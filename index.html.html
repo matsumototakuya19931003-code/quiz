@@ -1,0 +1,1379 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>小テスト管理システム</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/tabler-icons.min.css">
+<style>
+:root{
+  --bg:#f5f5f2;--bg2:#fff;--bg3:#f8f8f5;--border:#e5e5e0;--border2:#f0f0ec;
+  --text:#1a1a1a;--text2:#888;--text3:#aaa;--text4:#ccc;
+  --blue:#1d4ed8;--blue-bg:#eff6ff;--blue-border:#bfdbfe;
+  --green:#16a34a;--green-bg:#dcfce7;
+  --red:#dc2626;--red-bg:#fee2e2;
+  --yellow:#a16207;--yellow-bg:#fef9c3;
+  --amber:#f59e0b;--shadow:0 4px 16px rgba(0,0,0,0.1);
+}
+@media(prefers-color-scheme:dark){
+  :root{--bg:#111;--bg2:#1c1c1e;--bg3:#2c2c2e;--border:#3a3a3c;--border2:#2c2c2e;
+  --text:#f5f5f5;--text2:#aaa;--text3:#666;--text4:#444;
+  --blue:#60a5fa;--blue-bg:#1e3a5f;--blue-border:#2d5986;
+  --green:#4ade80;--green-bg:#14532d;--red:#f87171;--red-bg:#7f1d1d;
+  --yellow:#fcd34d;--yellow-bg:#78350f;--shadow:0 4px 16px rgba(0,0,0,0.4);}
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Hiragino Kaku Gothic ProN','Yu Gothic',sans-serif;font-size:14px;background:var(--bg);color:var(--text);line-height:1.6;padding-bottom:80px}
+input,select,textarea{width:100%;padding:8px 11px;border:1px solid var(--border);border-radius:7px;font-size:13px;font-family:inherit;background:var(--bg2);color:var(--text)}
+input:focus,select:focus,textarea:focus{outline:none;border-color:var(--text2);box-shadow:0 0 0 3px rgba(128,128,128,0.1)}
+button{font-family:inherit;cursor:pointer;transition:opacity 0.15s,transform 0.1s}
+button:active{transform:scale(0.97)}
+table{border-collapse:collapse;width:100%}
+@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+@keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+@keyframes slideUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+@keyframes progressBar{from{width:0}to{width:100%}}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.5}}
+canvas{display:block;touch-action:none}
+.page{animation:fadeIn 0.2s ease}
+.syncing{animation:pulse 1.5s ease-in-out infinite}
+@media(max-width:640px){
+  .hide-mobile{display:none!important}
+  .grid-stats{grid-template-columns:repeat(2,1fr)!important}
+  .grid-quiz{grid-template-columns:1fr!important}
+  .grid-2col{grid-template-columns:1fr!important}
+  .container{padding:0.85rem!important}
+}
+@media print{.no-print,.role-bar{display:none!important}body{padding:0;background:#fff}}
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<!-- Firebase SDK -->
+<script type="module">
+import{initializeApp}from"https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import{getDatabase,ref,set,get,onValue,push,remove,update}from"https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+
+// ============================================================
+// 🔧 STEP 1: 下のFIREBASE_CONFIGにFirebaseの設定を貼り付ける
+// Firebase Console → プロジェクト設定 → マイアプリ → SDK設定 → 構成
+// ============================================================
+const FIREBASE_CONFIG={
+  apiKey:"AIzaSyAHv5nywaGxT8uscJO90F0JIJspVVwoIP4",
+  authDomain:"quiz-system-6e5c3.firebaseapp.com",
+  databaseURL:"https://quiz-system-6e5c3-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId:"quiz-system-6e5c3",
+  storageBucket:"quiz-system-6e5c3.appspot.com",
+  messagingSenderId:"418219625244",
+  appId:"1:418219625244:web:f06a32ad5404a4c7eac8d9"
+};
+// ============================================================
+
+const configured=FIREBASE_CONFIG.apiKey!=="AIzaSyAHv5nywaGxT8uscJO90F0JIJspVVwoIP4";
+let fbDb=null;
+if(configured){
+  try{const app=initializeApp(FIREBASE_CONFIG);fbDb=getDatabase(app);}
+  catch(e){console.error("Firebase init error:",e);}
+}
+window.__fb={configured,fbDb,ref,set,get,onValue,push,remove,update};
+</script>
+
+<script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script type="text/babel" data-presets="react">
+const{useState,useRef,useEffect,useCallback,useMemo}=React;
+const{configured,fbDb,ref:fbRef,set:fbSet,onValue:fbOnValue,push:fbPush,remove:fbRemove,update:fbUpdate}=window.__fb;
+
+const LOCAL_KEY="quiz_v3";
+const DRAFT_KEY="quiz_draft_";
+const INIT={
+  classes:{c1:{id:"c1",name:"1年A組",grade:1},c2:{id:"c2",name:"1年B組",grade:1},c3:{id:"c3",name:"2年A組",grade:2}},
+  students:{
+    s1:{id:"s1",name:"田中 太郎",studentNumber:"001",classId:"c1",pin:"0001"},
+    s2:{id:"s2",name:"鈴木 花子",studentNumber:"002",classId:"c1",pin:"0002"},
+    s3:{id:"s3",name:"佐藤 次郎",studentNumber:"003",classId:"c2",pin:"0003"},
+    s4:{id:"s4",name:"山田 美咲",studentNumber:"004",classId:"c2",pin:"0004"},
+    s5:{id:"s5",name:"渡辺 健太",studentNumber:"005",classId:"c3",pin:"0005"},
+  },
+  quizzes:{
+    q1:{id:"q1",title:"1学期 数学 中間テスト",description:"方程式・関数",createdAt:"2026-04-20",deadline:null},
+    q2:{id:"q2",title:"1学期 英語 単語テスト",description:"Unit1〜3範囲",createdAt:"2026-05-01",deadline:"2026-06-01"},
+  },
+  distributions:{
+    d1:{id:"d1",quizId:"q1",classId:"c1",distributedAt:"2026-04-21"},
+    d2:{id:"d2",quizId:"q1",classId:"c2",distributedAt:"2026-04-21"},
+    d3:{id:"d3",quizId:"q2",classId:"c1",distributedAt:"2026-05-02"},
+  },
+  answers:{
+    a1:{id:"a1",quizId:"q1",studentId:"s1",status:"graded",submittedAt:"2026-04-28 14:30",imageData:null},
+    a2:{id:"a2",quizId:"q1",studentId:"s2",status:"submitted",submittedAt:"2026-04-28 14:45",imageData:null},
+    a3:{id:"a3",quizId:"q1",studentId:"s3",status:"graded",submittedAt:"2026-04-28 13:50",imageData:null},
+    a4:{id:"a4",quizId:"q2",studentId:"s1",status:"graded",submittedAt:"2026-05-05 10:00",imageData:null},
+  },
+  scores:{
+    a1:{id:"a1",answerId:"a1",isCorrect:true,comment:"よくできました",stars:3,gradedAt:"2026-04-29 10:00"},
+    a3:{id:"a3",answerId:"a3",isCorrect:false,comment:"計算ミスに注意",stars:1,gradedAt:"2026-04-29 10:15"},
+    a4:{id:"a4",answerId:"a4",isCorrect:true,comment:"完璧です",stars:3,gradedAt:"2026-05-06 09:00"},
+  },
+  notices:{},
+  settings:{teacherPassword:"teacher123"},
+};
+
+const S={
+  p:(x={})=>({display:"inline-flex",alignItems:"center",gap:5,padding:"8px 16px",background:"var(--text)",color:"var(--bg2)",border:"none",borderRadius:7,cursor:"pointer",fontSize:13,fontWeight:600,...x}),
+  o:(x={})=>({display:"inline-flex",alignItems:"center",gap:5,padding:"7px 13px",background:"var(--bg2)",color:"var(--text)",border:"1px solid var(--border)",borderRadius:7,cursor:"pointer",fontSize:13,...x}),
+  danger:(x={})=>({display:"inline-flex",alignItems:"center",gap:5,padding:"7px 13px",background:"var(--bg2)",color:"var(--red)",border:"1px solid var(--red-bg)",borderRadius:7,cursor:"pointer",fontSize:13,...x}),
+  card:{background:"var(--bg2)",borderRadius:10,border:"1px solid var(--border)",padding:"1rem 1.25rem"},
+  badge:(bg,c)=>({fontSize:11,padding:"3px 9px",borderRadius:20,background:bg,color:c,fontWeight:600}),
+};
+function nid(){return"id_"+Date.now()+"_"+Math.random().toString(36).slice(2,7);}
+
+/* ===== Toast / Confirm / Star / Search / Header ===== */
+function Toast({msg,type="success"}){
+  const c={success:"var(--text)",error:"var(--red)",info:"var(--blue)"};
+  return <div style={{position:"fixed",top:16,right:16,background:c[type],color:type==="success"?"var(--bg2)":"#fff",padding:"10px 16px",borderRadius:8,fontSize:13,fontWeight:600,zIndex:9999,boxShadow:"var(--shadow)",animation:"slideUp 0.2s ease",maxWidth:320}}>{msg}</div>;
+}
+function useToast(){const[t,setT]=useState(null);const show=useCallback((msg,type="success")=>{setT({msg,type});setTimeout(()=>setT(null),2800);},[]);return[t,show];}
+
+function ConfirmModal({title,message,onOk,onCancel,okLabel="削除",danger=true}){
+  useEffect(()=>{const h=e=>{if(e.key==="Enter")onOk();if(e.key==="Escape")onCancel();};window.addEventListener("keydown",h);return()=>window.removeEventListener("keydown",h);},[]);
+  return<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:500,padding:20}}>
+    <div style={{...S.card,width:"100%",maxWidth:340,boxShadow:"0 12px 40px rgba(0,0,0,0.3)",animation:"slideUp 0.18s ease"}}>
+      <div style={{fontWeight:700,fontSize:16,marginBottom:8}}>{title}</div>
+      <div style={{fontSize:13,color:"var(--text2)",marginBottom:20,lineHeight:1.7,whiteSpace:"pre-line"}}>{message}</div>
+      <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+        <button onClick={onCancel} style={S.o()}>キャンセル</button>
+        <button onClick={onOk} style={S.p({background:danger?"var(--red)":"var(--text)",color:"#fff"})}>{okLabel}</button>
+      </div>
+    </div>
+  </div>;
+}
+function useConfirm(){
+  const[cfg,setCfg]=useState(null);
+  const ask=(title,message,opts={})=>new Promise(res=>{setCfg({title,message,...opts,resolve:res});});
+  const Modal=cfg?<ConfirmModal {...cfg} onOk={()=>{cfg.resolve(true);setCfg(null);}} onCancel={()=>{cfg.resolve(false);setCfg(null);}}/>:null;
+  return[ask,Modal];
+}
+
+function StarRating({value,onChange,size=24,readonly=false}){
+  const[hov,setHov]=useState(null);const d=hov??value??0;
+  return<div style={{display:"flex",gap:2,alignItems:"center"}}>
+    {[1,2,3].map(n=><button key={n} onClick={()=>!readonly&&onChange&&onChange(value===n?null:n)} onMouseEnter={()=>!readonly&&setHov(n)} onMouseLeave={()=>!readonly&&setHov(null)} style={{background:"none",border:"none",cursor:readonly?"default":"pointer",padding:1,fontSize:size,color:n<=d?"#f59e0b":"var(--text4)",transition:"color 0.1s,transform 0.1s",transform:!readonly&&hov===n?"scale(1.2)":"scale(1)"}} aria-label={`星${n}`}>★</button>)}
+    {!readonly&&value&&<button onClick={()=>onChange(null)} style={{background:"none",border:"none",cursor:"pointer",fontSize:11,color:"var(--text3)",padding:"0 4px"}}>クリア</button>}
+  </div>;
+}
+
+function SearchInput({value,onChange,placeholder="検索..."}){
+  return<div style={{position:"relative"}}>
+    <i className="ti ti-search" style={{position:"absolute",left:10,top:"50%",transform:"translateY(-50%)",color:"var(--text3)",fontSize:15,pointerEvents:"none"}}/>
+    <input value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder} style={{paddingLeft:32}}/>
+    {value&&<button onClick={()=>onChange("")} style={{position:"absolute",right:8,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",color:"var(--text3)",fontSize:18,padding:2,cursor:"pointer"}}>×</button>}
+  </div>;
+}
+
+function Hdr({title,sub,back,onBack,onLogout,right}){
+  return<div style={{background:"var(--bg2)",borderBottom:"1px solid var(--border)",padding:"11px 20px",display:"flex",alignItems:"center",gap:10,position:"sticky",top:0,zIndex:50}} className="no-print">
+    {back&&<button onClick={onBack} style={S.o({padding:"5px 10px",gap:4,fontSize:12})}><i className="ti ti-arrow-left"/>戻る</button>}
+    <div style={{flex:1,minWidth:0}}><div style={{fontWeight:700,fontSize:16,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{title}</div>{sub&&<div style={{fontSize:12,color:"var(--text2)",marginTop:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{sub}</div>}</div>
+    {right}
+    {onLogout&&<button onClick={onLogout} style={S.o({fontSize:12,padding:"5px 12px"})}>ログアウト</button>}
+  </div>;
+}
+function Empty({msg,icon="ti-inbox"}){
+  return<div style={{...S.card,textAlign:"center",padding:"3rem 1.5rem"}}><i className={`ti ${icon}`} style={{fontSize:40,color:"var(--text4)"}}/><div style={{color:"var(--text3)",marginTop:12,fontSize:13}}>{msg}</div></div>;
+}
+function DeadlineBadge({deadline}){
+  if(!deadline)return null;
+  const days=Math.ceil((new Date(deadline)-new Date())/(1000*60*60*24));
+  if(days<0)return<span style={S.badge("var(--text4)","var(--bg2)")}>期限切れ</span>;
+  if(days===0)return<span style={S.badge("var(--red-bg)","var(--red)")}>本日締切</span>;
+  if(days<=3)return<span style={S.badge("var(--yellow-bg)","var(--yellow)")}>残り{days}日</span>;
+  return<span style={S.badge("var(--bg3)","var(--text2)")}>締切: {deadline}</span>;
+}
+function SyncBadge({syncing}){
+  if(!configured)return<span style={{fontSize:11,color:"var(--text3)",display:"flex",alignItems:"center",gap:4}}><i className="ti ti-cloud-off" style={{fontSize:13}}/>ローカル保存</span>;
+  return<span style={{fontSize:11,color:syncing?"var(--amber)":"var(--green)",display:"flex",alignItems:"center",gap:4}} className={syncing?"syncing":""}>
+    <i className={`ti ${syncing?"ti-cloud-upload":"ti-cloud-check"}`} style={{fontSize:13}}/>{syncing?"同期中...":"同期済み"}
+  </span>;
+}
+
+function RoleBar({role,db,userId,onSwitch}){
+  const[open,setOpen]=useState(false);
+  const students=Object.values(db.students||{});
+  const classes=db.classes||{};
+  const student=students.find(s=>s.id===userId);
+  const isTeacher=role==="teacher";
+  useEffect(()=>{const close=()=>setOpen(false);if(open)document.addEventListener("click",close);return()=>document.removeEventListener("click",close);},[open]);
+  return<div className="role-bar" style={{position:"fixed",bottom:20,left:"50%",transform:"translateX(-50%)",zIndex:200,display:"flex",flexDirection:"column",alignItems:"center",gap:8}}>
+    {open&&<div onClick={e=>e.stopPropagation()} style={{background:"var(--bg2)",borderRadius:12,border:"1px solid var(--border)",boxShadow:"0 8px 32px rgba(0,0,0,0.2)",padding:"0.75rem",display:"flex",flexDirection:"column",gap:4,minWidth:230,maxHeight:320,overflowY:"auto",animation:"slideUp 0.15s ease"}}>
+      <div style={{fontSize:11,color:"var(--text3)",fontWeight:700,padding:"2px 8px",marginBottom:4}}>画面を切り替える</div>
+      {isTeacher
+        ?Object.values(classes).map(cls=>{const ss=students.filter(s=>s.classId===cls.id);if(!ss.length)return null;return<div key={cls.id}><div style={{fontSize:11,color:"var(--text3)",padding:"6px 8px 2px",fontWeight:600}}>{cls.name}</div>{ss.map(s=><button key={s.id} onClick={()=>{onSwitch("student",s.id);setOpen(false);}} style={{display:"flex",alignItems:"center",gap:10,padding:"7px 12px",background:"none",border:"none",borderRadius:8,cursor:"pointer",textAlign:"left",width:"100%"}} onMouseEnter={e=>e.currentTarget.style.background="var(--bg3)"} onMouseLeave={e=>e.currentTarget.style.background="none"}><div style={{width:28,height:28,borderRadius:"50%",background:"var(--blue-bg)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,color:"var(--blue)",fontSize:12,flexShrink:0}}>{s.name[0]}</div><span style={{fontSize:13,fontWeight:500}}>{s.name}</span></button>)}</div>;})
+        :<button onClick={()=>{onSwitch("teacher",null);setOpen(false);}} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",background:"none",border:"none",borderRadius:8,cursor:"pointer",width:"100%"}} onMouseEnter={e=>e.currentTarget.style.background="var(--bg3)"} onMouseLeave={e=>e.currentTarget.style.background="none"}><div style={{width:28,height:28,borderRadius:"50%",background:"var(--bg3)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>👩‍🏫</div><span style={{fontSize:13,fontWeight:600}}>教員画面に戻る</span></button>}
+    </div>}
+    <button onClick={e=>{e.stopPropagation();setOpen(o=>!o);}} style={{display:"flex",alignItems:"center",gap:8,padding:"10px 22px",background:isTeacher?"var(--text)":"var(--blue)",color:"#fff",border:"none",borderRadius:99,cursor:"pointer",fontWeight:600,fontSize:13,boxShadow:"0 4px 20px rgba(0,0,0,0.3)"}}>
+      <i className={`ti ${isTeacher?"ti-user-check":"ti-school"}`}/>
+      {isTeacher?"教員画面":`${student?.name||"生徒"}の画面`}
+      <span style={{opacity:0.6,fontSize:12}}>⇄</span>
+    </button>
+  </div>;
+}
+
+/* ===== App本体・DB操作 ===== */
+function App(){
+  const[db,setDb]=useState(null);
+  const[loading,setLoading]=useState(true);
+  const[syncing,setSyncing]=useState(false);
+  const[role,setRole]=useState(null);
+  const[userId,setUserId]=useState(null);
+  const[page,setPage]=useState("login");
+  const[params,setParams]=useState({});
+  const[toast,showToast]=useToast();
+  const[confirm,ConfirmModal]=useConfirm();
+  const nav=(p,pr={})=>{setPage(p);setParams(pr);window.scrollTo(0,0);};
+
+  /* DB読み込み */
+  useEffect(()=>{
+    if(configured&&fbDb){
+      const unsub=fbOnValue(fbRef(fbDb,"/"),snap=>{
+        const data=snap.val();
+        if(data){setDb({classes:data.classes||{},students:data.students||{},quizzes:data.quizzes||{},distributions:data.distributions||{},answers:data.answers||{},scores:data.scores||{},notices:data.notices||{},settings:data.settings||{}});}
+        else{fbSet(fbRef(fbDb,"/"),INIT).then(()=>showToast("初期データをセットアップしました","info"));}
+        setLoading(false);
+      });
+      return()=>unsub();
+    }else{
+      try{const s=localStorage.getItem(LOCAL_KEY);setDb(s?JSON.parse(s):INIT);}catch{setDb(INIT);}
+      setLoading(false);
+    }
+  },[]);
+
+  /* 書き込みヘルパー */
+  const write=useCallback(async(path,value)=>{
+    setSyncing(true);
+    if(configured&&fbDb){await fbSet(fbRef(fbDb,path),value);}
+    else{
+      setDb(prev=>{
+        const keys=path.replace(/^\//,"").split("/");
+        const next=JSON.parse(JSON.stringify(prev));
+        let cur=next;for(let i=0;i<keys.length-1;i++){if(!cur[keys[i]])cur[keys[i]]={};cur=cur[keys[i]];}
+        cur[keys[keys.length-1]]=value;
+        try{localStorage.setItem(LOCAL_KEY,JSON.stringify(next));}catch{}
+        return next;
+      });
+    }
+    setTimeout(()=>setSyncing(false),500);
+  },[]);
+
+  const del=useCallback(async(path)=>{
+    setSyncing(true);
+    if(configured&&fbDb){await fbRemove(fbRef(fbDb,path));}
+    else{
+      setDb(prev=>{
+        const keys=path.replace(/^\//,"").split("/");
+        const next=JSON.parse(JSON.stringify(prev));
+        let cur=next;for(let i=0;i<keys.length-1;i++){if(!cur[keys[i]])return prev;cur=cur[keys[i]];}
+        delete cur[keys[keys.length-1]];
+        try{localStorage.setItem(LOCAL_KEY,JSON.stringify(next));}catch{}
+        return next;
+      });
+    }
+    setTimeout(()=>setSyncing(false),500);
+  },[]);
+
+  const switchRole=(newRole,newId)=>{
+    setRole(newRole);setUserId(newId);
+    if(newRole==="teacher")nav("t-home");else nav("s-home");
+    const name=db?.students?.[newId]?.name;
+    showToast(newRole==="teacher"?"教員画面に切り替えました":`${name||"生徒"}の画面に切り替えました`);
+  };
+
+  /* アクション */
+  const A=useMemo(()=>({
+    addC:async d=>{const id=nid();await write(`/classes/${id}`,{...d,id});showToast("クラスを作成しました");},
+    updateC:async(id,d)=>{await write(`/classes/${id}`,{...db?.classes?.[id],...d});showToast("更新しました");},
+    deleteC:async(id)=>{const ok=await confirm("クラスを削除",`「${db?.classes?.[id]?.name}」を削除しますか？`);if(!ok)return;await del(`/classes/${id}`);const ss=Object.values(db?.students||{}).filter(s=>s.classId===id);for(const s of ss)await del(`/students/${s.id}`);showToast("削除しました");},
+    addS:async d=>{const id=nid();await write(`/students/${id}`,{...d,id});},
+    updateS:async(id,d)=>{await write(`/students/${id}`,{...db?.students?.[id],...d});showToast("更新しました");},
+    deleteS:async id=>{const ok=await confirm("生徒を削除",`「${db?.students?.[id]?.name}」を削除しますか？`);if(!ok)return;await del(`/students/${id}`);showToast("削除しました");},
+    addQ:async d=>{const id=nid();await write(`/quizzes/${id}`,{...d,id,createdAt:new Date().toISOString().slice(0,10)});showToast("テストを作成しました");},
+    updateQ:async(id,d)=>{await write(`/quizzes/${id}`,{...db?.quizzes?.[id],...d});showToast("更新しました");},
+    dupQ:async q=>{const id=nid();await write(`/quizzes/${id}`,{...q,id,title:q.title+" (コピー)",createdAt:new Date().toISOString().slice(0,10)});showToast("複製しました");},
+    deleteQ:async id=>{const ok=await confirm("テストを削除",`「${db?.quizzes?.[id]?.title}」を削除しますか？\n配布・回答・採点データもすべて削除されます。`);if(!ok)return;await del(`/quizzes/${id}`);const ds=Object.values(db?.distributions||{}).filter(d=>d.quizId===id);for(const d of ds)await del(`/distributions/${d.id}`);const as=Object.values(db?.answers||{}).filter(a=>a.quizId===id);for(const a of as){await del(`/answers/${a.id}`);await del(`/scores/${a.id}`);}showToast("削除しました");},
+    distribute:async(qid,cids)=>{const ds=Object.values(db?.distributions||{}).filter(d=>d.quizId===qid);for(const d of ds)await del(`/distributions/${d.id}`);for(const cid of cids){const id=nid();await write(`/distributions/${id}`,{id,quizId:qid,classId:cid,distributedAt:new Date().toISOString().slice(0,10)});}showToast(`${cids.length}クラスに配布しました`);},
+    submitAnswer:async(qid,sid,imageData)=>{const id=nid();await write(`/answers/${id}`,{id,quizId:qid,studentId:sid,status:"submitted",submittedAt:new Date().toLocaleString("ja-JP"),imageData});return id;},
+    gradeAnswer:async(answerId,isCorrect,comment,stars)=>{await write(`/answers/${answerId}/status`,"graded");await write(`/scores/${answerId}`,{id:answerId,answerId,isCorrect,comment:comment||"",stars:stars??null,gradedAt:new Date().toLocaleString("ja-JP")});},
+    addNotice:async d=>{const id=nid();await write(`/notices/${id}`,{...d,id,createdAt:new Date().toLocaleString("ja-JP")});showToast("送信しました");},
+    deleteNotice:async id=>{const ok=await confirm("削除","お知らせを削除しますか？");if(!ok)return;await del(`/notices/${id}`);showToast("削除しました");},
+    saveSetting:async(key,value)=>{await write(`/settings/${key}`,value);},
+    resetData:async()=>{const ok=await confirm("データをリセット","全データを初期状態に戻しますか？\nこの操作は取り消せません。",{okLabel:"リセット"});if(!ok)return;if(configured&&fbDb)await fbSet(fbRef(fbDb,"/"),INIT);else{localStorage.setItem(LOCAL_KEY,JSON.stringify(INIT));setDb(INIT);}showToast("リセットしました","info");},
+  }),[db,confirm,write,del,showToast]);
+
+  const ctx={db,nav,userId,setRole,showToast,confirm,syncing,...A};
+
+  if(loading)return<div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:12,background:"var(--bg)"}}>
+    <i className="ti ti-loader" style={{fontSize:40,color:"var(--text3)",animation:"spin 1s linear infinite"}}/>
+    <div style={{color:"var(--text2)",fontSize:13}}>読み込み中...</div>
+  </div>;
+
+  if(!db)return null;
+
+  if(!role)return<>{toast&&<Toast {...toast}/>}{ConfirmModal}<Login db={db} onTeacher={()=>{setRole("teacher");nav("t-home");}} onStudent={(id)=>{setRole("student");setUserId(id);nav("s-home");}}/></>;
+
+  const tPages={
+    "t-home":<THome ctx={ctx} syncing={syncing}/>,
+    "manage-classes":<ManageClasses ctx={ctx}/>,
+    "manage-students":<ManageStudents ctx={ctx}/>,
+    "create-quiz":<CreateQuiz ctx={ctx}/>,
+    "distribute-quiz":<DistributeQuiz ctx={ctx} params={params}/>,
+    "submissions":<Submissions ctx={ctx} params={params}/>,
+    "grade-answer":<GradeAnswer ctx={ctx} params={params}/>,
+    "grades-list":<GradesList ctx={ctx}/>,
+    "notices":<Notices ctx={ctx}/>,
+    "settings":<Settings ctx={ctx}/>,
+    "s-preview":<SHome ctx={{...ctx,userId:params.previewId,previewMode:true}}/>,
+  };
+  const sPages={"s-home":<SHome ctx={ctx}/>,"take-quiz":<TakeQuiz ctx={ctx} params={params}/>,"submitted":<Submitted ctx={ctx}/>};
+  const pages=role==="teacher"?tPages:sPages;
+  return<>
+    {toast&&<Toast {...toast}/>}
+    {ConfirmModal}
+    {pages[page]||(role==="teacher"?<THome ctx={ctx}/>:<SHome ctx={ctx}/>)}
+    <RoleBar role={role} db={db} userId={userId} onSwitch={switchRole}/>
+  </>;
+}
+
+/* ===== ログイン ===== */
+function Login({db,onTeacher,onStudent}){
+  const[tab,setTab]=useState("t");
+  const[selClass,setSelClass]=useState("");
+  const[pin,setPin]=useState("");
+  const[err,setErr]=useState("");
+  const[showPin,setShowPin]=useState(false);
+  const classes=Object.values(db.classes||{}).sort((a,b)=>a.name.localeCompare(b.name));
+  const students=Object.values(db.students||{});
+  const storedPw=db?.settings?.teacherPassword||"teacher123";
+  const[pw,setPw]=useState("");const[pwErr,setPwErr]=useState("");
+  const doTeacher=()=>{if(pw===storedPw)onTeacher();else setPwErr("パスワードが違います");};
+  const doStudent=()=>{
+    setErr("");
+    const found=students.filter(s=>s.classId===selClass).find(s=>s.pin===pin.trim());
+    if(!found){setErr("クラスまたはPINが正しくありません");return;}
+    onStudent(found.id);
+  };
+  return<div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"var(--bg)",padding:20}}>
+    <div style={{width:"100%",maxWidth:420}}>
+      <div style={{textAlign:"center",marginBottom:28}}>
+        <div style={{fontSize:52,marginBottom:10}}>📝</div>
+        <div style={{fontSize:24,fontWeight:700}}>小テスト管理システム</div>
+        <div style={{color:"var(--text2)",fontSize:13,marginTop:6}}>ログインしてください</div>
+        {!configured&&<div style={{marginTop:10,fontSize:12,padding:"6px 12px",background:"var(--yellow-bg)",color:"var(--yellow)",borderRadius:6,display:"inline-block"}}>⚠ デモモード（Firebase未設定・ローカル保存のみ）</div>}
+      </div>
+      <div style={{...S.card,padding:0,overflow:"hidden",boxShadow:"var(--shadow)"}}>
+        <div style={{display:"flex",borderBottom:"1px solid var(--border)"}}>
+          {[["t","👩‍🏫 教員"],["s","🎒 生徒"]].map(([k,l])=><button key={k} onClick={()=>{setTab(k);setErr("");setPwErr("");}} style={{flex:1,padding:14,background:tab===k?"var(--bg3)":"var(--bg2)",border:"none",cursor:"pointer",fontWeight:tab===k?700:400,color:tab===k?"var(--text)":"var(--text2)",fontSize:14}}>{l}</button>)}
+        </div>
+        <div style={{padding:"1.5rem"}}>
+          {tab==="t"?<>
+            <p style={{fontSize:13,color:"var(--text2)",marginBottom:12}}>教員用パスワードでログインします</p>
+            <input type="password" value={pw} onChange={e=>{setPw(e.target.value);setPwErr("");}} placeholder="パスワードを入力" onKeyDown={e=>e.key==="Enter"&&doTeacher()} style={{marginBottom:10}}/>
+            {pwErr&&<div style={{fontSize:12,color:"var(--red)",marginBottom:10,padding:"6px 10px",background:"var(--red-bg)",borderRadius:6}}>{pwErr}</div>}
+            <button onClick={doTeacher} disabled={!pw} style={S.p({width:"100%",justifyContent:"center",padding:13,fontSize:15,opacity:pw?1:0.4})}>教員としてログイン</button>
+            <p style={{fontSize:11,color:"var(--text3)",marginTop:8,textAlign:"center"}}>初期パスワード: teacher123（設定から変更可能）</p>
+          </>:<>
+            <p style={{fontSize:13,color:"var(--text2)",marginBottom:12}}>クラスとPINコードでログインします</p>
+            <div style={{marginBottom:10}}>
+              <label style={{fontSize:12,fontWeight:600,display:"block",marginBottom:5}}>クラスを選択</label>
+              <select value={selClass} onChange={e=>{setSelClass(e.target.value);setErr("");}}>
+                <option value="">クラスを選択...</option>
+                {classes.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </div>
+            <div style={{marginBottom:12}}>
+              <label style={{fontSize:12,fontWeight:600,display:"block",marginBottom:5}}>PINコード（4桁）</label>
+              <div style={{position:"relative"}}>
+                <input type={showPin?"text":"password"} value={pin} onChange={e=>{setPin(e.target.value.slice(0,4));setErr("");}} placeholder="0000" maxLength={4} style={{letterSpacing:6,fontSize:20,textAlign:"center",paddingRight:40}} onKeyDown={e=>e.key==="Enter"&&selClass&&pin.length>=4&&doStudent()}/>
+                <button onClick={()=>setShowPin(v=>!v)} style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",color:"var(--text3)",cursor:"pointer",fontSize:16}}><i className={`ti ${showPin?"ti-eye-off":"ti-eye"}`}/></button>
+              </div>
+            </div>
+            {err&&<div style={{fontSize:12,color:"var(--red)",marginBottom:10,padding:"6px 10px",background:"var(--red-bg)",borderRadius:6}}>{err}</div>}
+            <button onClick={doStudent} disabled={!selClass||pin.length<4} style={S.p({width:"100%",justifyContent:"center",padding:13,fontSize:15,opacity:selClass&&pin.length>=4?1:0.4})}>ログイン</button>
+            <p style={{fontSize:11,color:"var(--text3)",marginTop:10,textAlign:"center"}}>PINコードは先生から配布されます</p>
+          </>}
+        </div>
+      </div>
+    </div>
+  </div>;
+}
+
+/* ===== 設定 ===== */
+function Settings({ctx}){
+  const{db,nav,saveSetting,resetData,showToast}=ctx;
+  const[pw,setPw]=useState(db?.settings?.teacherPassword||"teacher123");
+  const[saved,setSaved]=useState(false);
+  const save=async()=>{await saveSetting("teacherPassword",pw);setSaved(true);showToast("パスワードを変更しました");};
+  return<div style={{minHeight:"100vh",background:"var(--bg)"}} className="page">
+    <Hdr title="設定" back onBack={()=>nav("t-home")}/>
+    <div style={{maxWidth:560,margin:"0 auto",padding:"1.5rem",display:"flex",flexDirection:"column",gap:14}}>
+      <div style={S.card}>
+        <div style={{fontWeight:700,marginBottom:12}}>教員パスワード変更</div>
+        <input type="text" value={pw} onChange={e=>{setPw(e.target.value);setSaved(false);}} placeholder="新しいパスワード（4文字以上）" style={{marginBottom:10}}/>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <button onClick={save} disabled={pw.length<4} style={S.p({opacity:pw.length>=4?1:0.4})}>変更を保存</button>
+          {saved&&<span style={{fontSize:12,color:"var(--green)"}}>✓ 保存しました</span>}
+        </div>
+      </div>
+      <div style={S.card}>
+        <div style={{fontWeight:700,marginBottom:8}}>Firebase接続状態</div>
+        {configured?<div style={{fontSize:13,color:"var(--green)"}}>✓ Firebaseに接続されています（リアルタイム同期中）</div>:<div style={{fontSize:13,color:"var(--amber)"}}>⚠ Firebase未設定<br/><span style={{fontSize:12,color:"var(--text2)"}}>HTMLファイルの FIREBASE_CONFIG にFirebaseの設定を貼り付けてください。設定方法は生徒管理 → ログインガイドを参照。</span></div>}
+      </div>
+      <div style={S.card}>
+        <div style={{fontWeight:700,marginBottom:4,color:"var(--red)"}}>データリセット</div>
+        <div style={{fontSize:13,color:"var(--text2)",marginBottom:12}}>全データを初期状態に戻します。この操作は取り消せません。</div>
+        <button onClick={resetData} style={S.danger()}>データをリセット</button>
+      </div>
+    </div>
+  </div>;
+}
+
+/* ===== クラス管理 ===== */
+function ManageClasses({ctx}){
+  const{db,nav,addC,updateC,deleteC,showToast}=ctx;
+  const[ng,setNg]=useState("1");const[nt,setNt]=useState("A");
+  const[eid,setEid]=useState(null);const[eg,setEg]=useState("1");const[et,setEt]=useState("A");
+  const grades=["1","2","3"];const types=["A","B","C","SE","SF","1","2","3","4","5","6","商業","工業"];
+  const classes=Object.values(db.classes||{});
+  return<div style={{minHeight:"100vh",background:"var(--bg)"}} className="page">
+    <Hdr title="クラス管理" back onBack={()=>nav("t-home")}/>
+    <div style={{maxWidth:660,margin:"0 auto",padding:"1.5rem"}}>
+      <div style={{...S.card,marginBottom:"1rem"}}>
+        <div style={{fontWeight:700,marginBottom:12}}>新しいクラスを作成</div>
+        <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+          <select value={ng} onChange={e=>setNg(e.target.value)} style={{width:90}}>{grades.map(g=><option key={g} value={g}>{g}年</option>)}</select>
+          <select value={nt} onChange={e=>setNt(e.target.value)} style={{width:90}}>{types.map(t=><option key={t} value={t}>{t}組</option>)}</select>
+          <button onClick={()=>addC({name:`${ng}年${nt}組`,grade:Number(ng)})} style={S.p({marginLeft:"auto"})}><i className="ti ti-plus"/>作成</button>
+        </div>
+      </div>
+      <div style={{display:"flex",flexDirection:"column",gap:8}}>
+        {classes.map(c=>{const sc=Object.values(db.students||{}).filter(s=>s.classId===c.id).length;const m=c.name.match(/(\d+)年(.+)組/);return<div key={c.id} style={{...S.card,padding:"0.85rem 1rem",display:"flex",alignItems:"center",gap:10}}>
+          {eid===c.id?<><select value={eg} onChange={e=>setEg(e.target.value)} style={{width:80}}>{grades.map(g=><option key={g} value={g}>{g}年</option>)}</select><select value={et} onChange={e=>setEt(e.target.value)} style={{width:80}}>{types.map(t=><option key={t} value={t}>{t}組</option>)}</select><div style={{marginLeft:"auto",display:"flex",gap:6}}><button onClick={async()=>{await updateC(c.id,{name:`${eg}年${et}組`,grade:Number(eg)});setEid(null);}} style={S.p()}>保存</button><button onClick={()=>setEid(null)} style={S.o()}>キャンセル</button></div></>
+          :<><div style={{flex:1}}><span style={{fontWeight:700}}>{c.name}</span><span style={{marginLeft:8,fontSize:12,color:"var(--text2)"}}>{sc}名</span></div><button onClick={()=>{setEid(c.id);setEg(m?.[1]||"1");setEt(m?.[2]||"A");}} style={S.o({padding:"5px 9px"})}><i className="ti ti-edit"/></button><button onClick={()=>deleteC(c.id)} style={S.danger({padding:"5px 9px"})}><i className="ti ti-trash"/></button></>}
+        </div>;})}
+        {classes.length===0&&<Empty msg="クラスがありません" icon="ti-school"/>}
+      </div>
+    </div>
+  </div>;
+}
+
+
+/* ===== 生徒1人追加フォーム ===== */
+function AddStudentForm({ctx,classes,onDone}){
+  const{addS,showToast,db}=ctx;
+  const students=Object.values(db.students||{});
+  const[name,setName]=useState("");
+  const[num,setNum]=useState("");
+  const[classId,setClassId]=useState(classes[0]?.id||"");
+  const[pin,setPin]=useState("");
+  const[pinAuto,setPinAuto]=useState(true);
+  const[done,setDone]=useState(false);
+  const[added,setAdded]=useState([]);
+  const[saving,setSaving]=useState(false);
+
+  // PIN自動生成（登録済み生徒数+1をゼロ埋め4桁）
+  useEffect(()=>{
+    if(pinAuto){
+      const nextNum=students.length+added.length+1;
+      setPin(String(nextNum).padStart(4,"0"));
+    }
+  },[pinAuto,students.length,added.length]);
+
+  // 学番自動生成
+  useEffect(()=>{
+    if(!num){
+      const nextNum=students.length+added.length+1;
+      setNum(String(nextNum).padStart(3,"0"));
+    }
+  },[students.length,added.length]);
+
+  const validate=()=>{
+    if(!name.trim()){showToast("名前を入力してください","error");return false;}
+    if(!num.trim()){showToast("学番を入力してください","error");return false;}
+    if(!classId){showToast("クラスを選択してください","error");return false;}
+    if(pin.length!==4||!/^\d{4}$/.test(pin)){showToast("PINは4桁の数字を入力してください","error");return false;}
+    if(students.some(s=>s.studentNumber===num.trim()&&s.classId===classId)){
+      showToast("同じクラスに同じ学番の生徒がすでにいます","error");return false;
+    }
+    return true;
+  };
+
+  const handleAdd=async()=>{
+    if(!validate())return;
+    setSaving(true);
+    await addS({name:name.trim(),studentNumber:num.trim(),classId,pin});
+    const cls=classes.find(c=>c.id===classId);
+    setAdded(prev=>[...prev,{name:name.trim(),num:num.trim(),cls:cls?.name,pin}]);
+    showToast(`${name.trim()} さんを登録しました`);
+    // フォームをリセット（名前と学番だけクリア）
+    setName("");
+    setNum("");
+    if(pinAuto){
+      const nextNum=students.length+added.length+2;
+      setPin(String(nextNum).padStart(4,"0"));
+    }
+    setSaving(false);
+  };
+
+  const handleKeyDown=e=>{if(e.key==="Enter")handleAdd();};
+
+  return<div>
+    <div style={S.card}>
+      <div style={{fontWeight:700,fontSize:15,marginBottom:16,display:"flex",alignItems:"center",gap:8}}>
+        <i className="ti ti-user-plus" style={{fontSize:20,color:"var(--blue)"}}/>
+        生徒を1人ずつ登録
+      </div>
+
+      {/* 名前 */}
+      <div style={{marginBottom:12}}>
+        <label style={{fontSize:13,fontWeight:600,display:"block",marginBottom:5}}>氏名 *</label>
+        <input value={name} onChange={e=>setName(e.target.value)} onKeyDown={handleKeyDown} placeholder="例：田中 太郎" autoFocus/>
+      </div>
+
+      {/* 学番 */}
+      <div style={{marginBottom:12}}>
+        <label style={{fontSize:13,fontWeight:600,display:"block",marginBottom:5}}>学番 *</label>
+        <input value={num} onChange={e=>setNum(e.target.value)} onKeyDown={handleKeyDown} placeholder="例：001"/>
+      </div>
+
+      {/* クラス */}
+      <div style={{marginBottom:12}}>
+        <label style={{fontSize:13,fontWeight:600,display:"block",marginBottom:5}}>クラス *</label>
+        {classes.length===0
+          ?<div style={{fontSize:13,color:"var(--red)",padding:"8px 12px",background:"var(--red-bg)",borderRadius:6}}>
+              クラスがありません。先に「クラス管理」でクラスを作成してください。
+            </div>
+          :<select value={classId} onChange={e=>setClassId(e.target.value)}>
+              {classes.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>}
+      </div>
+
+      {/* PIN */}
+      <div style={{marginBottom:16}}>
+        <label style={{fontSize:13,fontWeight:600,display:"block",marginBottom:5}}>
+          PINコード（4桁）*
+          <span style={{fontSize:11,fontWeight:400,color:"var(--text3)",marginLeft:8}}>生徒がログインに使います</span>
+        </label>
+        <div style={{display:"flex",gap:8,alignItems:"center"}}>
+          <div style={{position:"relative",flex:1}}>
+            <input value={pin} onChange={e=>{setPin(e.target.value.replace(/\D/g,"").slice(0,4));setPinAuto(false);}} onKeyDown={handleKeyDown} placeholder="0000" maxLength={4} style={{textAlign:"center",letterSpacing:8,fontSize:20,fontWeight:700}}/>
+          </div>
+          <button onClick={()=>{setPinAuto(true);const n=students.length+added.length+1;setPin(String(n).padStart(4,"0"));}} style={S.o({fontSize:12,whiteSpace:"nowrap"})}>
+            <i className="ti ti-refresh"/>自動生成
+          </button>
+        </div>
+        {pinAuto&&<div style={{fontSize:11,color:"var(--text3)",marginTop:4}}><i className="ti ti-info-circle"/> 登録済み生徒数をもとに自動で設定しています</div>}
+      </div>
+
+      {/* 追加ボタン */}
+      <div style={{display:"flex",gap:8}}>
+        <button onClick={handleAdd} disabled={saving||!name||!classId} style={S.p({flex:1,justifyContent:"center",padding:"11px",fontSize:14,opacity:saving||!name||!classId?0.5:1})}>
+          {saving?<><i className="ti ti-loader" style={{animation:"spin 0.8s linear infinite"}}/>登録中...</>:<><i className="ti ti-user-plus"/>登録する</>}
+        </button>
+        <button onClick={onDone} style={S.o({padding:"11px 16px"})}>一覧へ戻る</button>
+      </div>
+    </div>
+
+    {/* 今回追加した生徒リスト */}
+    {added.length>0&&<div style={{...S.card,marginTop:12}}>
+      <div style={{fontWeight:600,fontSize:13,marginBottom:10,color:"var(--green)",display:"flex",alignItems:"center",gap:6}}>
+        <i className="ti ti-check"/>今回登録した生徒（{added.length}名）
+      </div>
+      <table style={{fontSize:13}}>
+        <thead><tr style={{borderBottom:"1px solid var(--border)"}}>
+          {["氏名","学番","クラス","PIN"].map(h=><th key={h} style={{textAlign:"left",padding:"5px 10px",fontWeight:600,fontSize:12,color:"var(--text2)"}}>{h}</th>)}
+        </tr></thead>
+        <tbody>{added.map((s,i)=><tr key={i} style={{borderBottom:"1px solid var(--border2)"}}>
+          <td style={{padding:"7px 10px",fontWeight:600}}>{s.name}</td>
+          <td style={{padding:"7px 10px",color:"var(--text2)"}}>{s.num}</td>
+          <td style={{padding:"7px 10px",color:"var(--text2)"}}>{s.cls}</td>
+          <td style={{padding:"7px 10px"}}><code style={{background:"var(--bg3)",padding:"2px 8px",borderRadius:4,letterSpacing:3,fontWeight:700}}>{s.pin}</code></td>
+        </tr>)}
+        </tbody>
+      </table>
+      <button onClick={()=>{
+        const h="﻿氏名,学番,クラス,PIN
+";
+        const rows=added.map(s=>[s.name,s.num,s.cls,s.pin].join(",")).join("
+");
+        const a=document.createElement("a");
+        a.href=URL.createObjectURL(new Blob([h+rows],{type:"text/csv;charset=utf-8;"}));
+        a.download="今回登録した生徒.csv";a.click();
+      }} style={S.o({fontSize:12,marginTop:10})}>
+        <i className="ti ti-download"/>このリストをCSVで保存
+      </button>
+    </div>}
+  </div>;
+}
+
+/* ===== 生徒管理 ===== */
+function ManageStudents({ctx}){
+  const{db,nav,addS,updateS,deleteS,showToast}=ctx;
+  const[tab,setTab]=useState("list");
+  const[search,setSearch]=useState("");
+  const[csv,setCsv]=useState("名前,学番,クラス名,PIN\n田中 太郎,001,1年A組,0001\n鈴木 花子,002,1年A組,0002");
+  const[prev,setPrev]=useState([]);
+  const[editId,setEditId]=useState(null);
+  const[editData,setEditData]=useState({pin:"",classId:""});
+  const students=Object.values(db.students||{});
+  const classes=Object.values(db.classes||{});
+  const filtered=students.filter(s=>s.name.includes(search)||s.studentNumber.includes(search));
+  const parse=()=>{const lines=csv.trim().split("\n").slice(1);setPrev(lines.map(l=>{const[name,num,cls,pin]=l.split(",").map(s=>s.trim());const c=classes.find(x=>x.name===cls);return{name,num,cls,pin:pin||"0000",classId:c?.id||null,ok:!!(name&&num&&c)};}));};
+  const doImport=async()=>{for(const p of prev.filter(p=>p.ok))await addS({name:p.name,studentNumber:p.num,classId:p.classId,pin:p.pin});showToast(`${prev.filter(p=>p.ok).length}名をインポートしました`);setTab("list");setPrev([]);};
+  return<div style={{minHeight:"100vh",background:"var(--bg)"}} className="page">
+    <Hdr title="生徒管理" back onBack={()=>nav("t-home")} right={<span style={{fontSize:13,color:"var(--text2)"}}>{students.length}名登録</span>}/>
+    <div style={{maxWidth:720,margin:"0 auto",padding:"1.5rem"}}>
+      <div style={{display:"flex",gap:0,marginBottom:"1rem",borderRadius:8,overflow:"hidden",border:"1px solid var(--border)"}}>
+        {[["list","👥 生徒一覧"],["add","➕ 1人追加"],["import","📥 CSVインポート"],["guide","📋 ログインガイド"]].map(([k,l])=><button key={k} onClick={()=>setTab(k)} style={{flex:1,padding:"11px 4px",background:tab===k?"var(--text)":"var(--bg2)",color:tab===k?"var(--bg2)":"var(--text2)",border:"none",cursor:"pointer",fontWeight:tab===k?700:400,fontSize:11,lineHeight:1.3}}>{l}</button>)}
+      </div>
+
+      {tab==="add"&&<AddStudentForm ctx={ctx} classes={classes} onDone={()=>setTab("list")}/>}
+      {tab==="list"&&<>
+        <div style={{display:"flex",gap:8,marginBottom:10,flexWrap:"wrap"}}>
+          <div style={{flex:1,minWidth:160}}><SearchInput value={search} onChange={setSearch} placeholder="氏名・学番で検索..."/></div>
+          <button onClick={()=>{
+            const h="﻿名前,学番,クラス名,PIN
+";
+            const rows=students.map(s=>{const c=classes.find(x=>x.id===s.classId);return[s.name,s.studentNumber,c?.name||"",s.pin||""].join(",");}).join("
+");
+            const a=document.createElement("a");
+            a.href=URL.createObjectURL(new Blob([h+rows],{type:"text/csv;charset=utf-8;"}));
+            a.download="生徒一覧_エクスポート.csv";
+            a.click();
+          }} style={S.o({fontSize:12})} disabled={students.length===0} title="現在登録されている生徒をCSVで出力">
+            <i className="ti ti-download"/>CSVで出力
+          </button>
+        </div>
+        <div style={{...S.card,padding:0,overflow:"hidden"}}>
+          {filtered.length===0
+            ?<div style={{padding:"2.5rem",textAlign:"center",color:"var(--text3)",fontSize:13}}>
+                <i className="ti ti-users" style={{fontSize:36,color:"var(--text4)",display:"block",marginBottom:10}}/>
+                {search?"検索に一致する生徒がいません":"生徒がまだ登録されていません。「CSVインポート」タブから登録してください。"}
+              </div>
+            :<table><thead><tr style={{background:"var(--bg3)",borderBottom:"1px solid var(--border)"}}>
+              {["氏名","学番","クラス","PINコード","操作"].map(h=><th key={h} style={{textAlign:"left",padding:"9px 14px",fontWeight:600,fontSize:12,color:"var(--text2)"}}>{h}</th>)}
+            </tr></thead><tbody>
+            {filtered.map(s=>{
+              const c=classes.find(x=>x.id===s.classId);
+              const isEdit=editId===s.id;
+              return<tr key={s.id} style={{borderBottom:"1px solid var(--border2)",background:isEdit?"var(--blue-bg)":"transparent"}}>
+                <td style={{padding:"10px 14px",fontWeight:600}}>{s.name}</td>
+                <td style={{padding:"10px 14px",color:"var(--text2)"}}>{s.studentNumber}</td>
+                <td style={{padding:"10px 14px"}}>
+                  {isEdit
+                    ?<select value={editData.classId||s.classId} onChange={e=>setEditData(d=>({...d,classId:e.target.value}))} style={{width:"auto",padding:"4px 8px"}}>
+                        {classes.map(cl=><option key={cl.id} value={cl.id}>{cl.name}</option>)}
+                      </select>
+                    :<span style={{color:"var(--text2)"}}>{c?.name||<span style={{color:"var(--text4)"}}>未設定</span>}</span>}
+                </td>
+                <td style={{padding:"10px 14px"}}>
+                  {isEdit
+                    ?<input value={editData.pin!==undefined?editData.pin:(s.pin||"")} onChange={e=>setEditData(d=>({...d,pin:e.target.value.slice(0,4)}))} style={{width:80,textAlign:"center",letterSpacing:4,padding:"4px 8px"}} maxLength={4} placeholder="0000"/>
+                    :<code style={{background:"var(--bg3)",padding:"3px 12px",borderRadius:6,letterSpacing:4,fontWeight:700,fontSize:15,border:"1px solid var(--border)"}}>{s.pin||"—"}</code>}
+                </td>
+                <td style={{padding:"10px 14px"}}>
+                  {isEdit
+                    ?<div style={{display:"flex",gap:6}}>
+                        <button onClick={async()=>{await updateS(s.id,{pin:editData.pin!==undefined?editData.pin:(s.pin||""),classId:editData.classId||s.classId});setEditId(null);showToast("更新しました");}} style={S.p({fontSize:12,padding:"5px 12px"})}>保存</button>
+                        <button onClick={()=>setEditId(null)} style={S.o({fontSize:12,padding:"5px 10px"})}>キャンセル</button>
+                      </div>
+                    :<div style={{display:"flex",gap:4}}>
+                        <button onClick={()=>{setEditId(s.id);setEditData({pin:s.pin||"",classId:s.classId});}} style={S.o({fontSize:11,padding:"4px 9px"})} title="PIN・クラス変更"><i className="ti ti-edit"/></button>
+                        <button onClick={()=>deleteS(s.id)} style={S.danger({fontSize:11,padding:"4px 9px"})} title="削除"><i className="ti ti-trash"/></button>
+                      </div>}
+                </td>
+              </tr>;
+            })}
+            </tbody></table>}
+        </div>
+      </>}
+
+      {tab==="import"&&<>
+        <div style={{...S.card,marginBottom:"1rem"}}>
+          <div style={{fontSize:12,color:"var(--text2)",marginBottom:10,lineHeight:1.8,padding:"10px 12px",background:"var(--blue-bg)",borderRadius:6,border:"1px solid var(--blue-border)"}}>
+            <strong>CSV形式:</strong> 名前,学番,クラス名,PIN（4桁の数字）<br/>
+            <strong>登録済みクラス:</strong> {classes.length>0?classes.map(c=>c.name).join("、"):<span style={{color:"var(--red)"}}>クラスがありません。先に「クラス管理」でクラスを作成してください。</span>}<br/>
+            <strong>PINの例:</strong> 出席番号1番→0001、2番→0002
+          </div>
+          <div style={{display:"flex",gap:8,marginBottom:10,flexWrap:"wrap"}}>
+            <button onClick={()=>{
+              const header="名前,学番,クラス名,PIN
+";
+              const rows=classes.length>0
+                ?classes.flatMap(c=>[
+                    `田中 太郎,001,${c.name},0001`,
+                    `鈴木 花子,002,${c.name},0002`,
+                  ]).join("
+")
+                :"田中 太郎,001,1年A組,0001
+鈴木 花子,002,1年A組,0002";
+              const csv="﻿"+header+rows;
+              const a=document.createElement("a");
+              a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8;"}));
+              a.download="生徒登録テンプレート.csv";
+              a.click();
+            }} style={S.p({fontSize:12})}>
+              <i className="ti ti-download"/>テンプレートCSVをダウンロード
+            </button>
+            {classes.length>0&&<button onClick={()=>{
+              const header="名前,学番,クラス名,PIN
+";
+              const rows=classes.flatMap((c,ci)=>
+                Array.from({length:5},(_,i)=>{
+                  const num=String(ci*5+i+1).padStart(3,"0");
+                  const pin=String(ci*5+i+1).padStart(4,"0");
+                  return `生徒${num},${num},${c.name},${pin}`;
+                })
+              ).join("
+");
+              const csv="﻿"+header+rows;
+              const a=document.createElement("a");
+              a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8;"}));
+              a.download="生徒登録サンプル_全クラス.csv";
+              a.click();
+            }} style={S.o({fontSize:12})}>
+              <i className="ti ti-file-spreadsheet"/>全クラスのサンプルCSV
+            </button>}
+          </div>
+          <textarea value={csv} onChange={e=>setCsv(e.target.value)} rows={8} style={{fontFamily:"monospace",fontSize:12}}/>
+          <button onClick={parse} style={S.o({marginTop:10})}><i className="ti ti-eye"/>プレビュー</button>
+        </div>
+        {prev.length>0&&<div style={S.card}>
+          <div style={{fontWeight:700,marginBottom:10}}>プレビュー（{prev.filter(p=>p.ok).length}/{prev.length}件 OK）</div>
+          <table><thead><tr style={{borderBottom:"1px solid var(--border)"}}>
+            {["名前","学番","クラス","PIN","状態"].map(h=><th key={h} style={{textAlign:"left",padding:"6px 8px",fontWeight:600,fontSize:12,color:"var(--text2)"}}>{h}</th>)}
+          </tr></thead><tbody>
+          {prev.map((p,i)=><tr key={i} style={{borderBottom:"1px solid var(--border2)"}}>
+            <td style={{padding:"6px 8px"}}>{p.name}</td>
+            <td style={{padding:"6px 8px",color:"var(--text2)"}}>{p.num}</td>
+            <td style={{padding:"6px 8px",color:"var(--text2)"}}>{p.cls}</td>
+            <td style={{padding:"6px 8px"}}><code style={{letterSpacing:2}}>{p.pin}</code></td>
+            <td style={{padding:"6px 8px"}}><span style={S.badge(p.ok?"var(--green-bg)":"var(--red-bg)",p.ok?"var(--green)":"var(--red)")}>{p.ok?"OK":"エラー"}</span></td>
+          </tr>)}
+          </tbody></table>
+          <button onClick={doImport} style={S.p({marginTop:12})}>インポートを実行</button>
+        </div>}
+      </>}
+
+      {tab==="guide"&&<div style={S.card}>
+        <div style={{fontWeight:700,fontSize:16,marginBottom:16}}>🔐 生徒のログイン方法</div>
+        {[{n:"1",t:"URLをクラスに配布する",d:"このHTMLファイルを公開してURLを生徒に伝えます。GitHub Pages（無料）での公開が最もかんたんです。"},
+          {n:"2",t:"「🎒 生徒」タブを選ぶ",d:"生徒はログイン画面で生徒タブをクリックします。"},
+          {n:"3",t:"クラスを選んでPINを入力",d:"自分のクラスを選んで、4桁のPINコードを入力してログインします。PINコードは上の「生徒一覧」タブで確認・変更できます。"},
+        ].map(s=><div key={s.n} style={{display:"flex",gap:14,alignItems:"flex-start",marginBottom:14}}>
+          <div style={{width:32,height:32,borderRadius:"50%",background:"var(--text)",color:"var(--bg2)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:15,flexShrink:0}}>{s.n}</div>
+          <div><div style={{fontWeight:700,marginBottom:3}}>{s.t}</div><div style={{fontSize:13,color:"var(--text2)",lineHeight:1.7}}>{s.d}</div></div>
+        </div>)}
+        <div style={{marginTop:8,padding:"12px 14px",background:"var(--green-bg)",borderRadius:8,border:"1px solid var(--green)"}}>
+          <div style={{fontWeight:700,color:"var(--green)",marginBottom:8,fontSize:13}}><i className="ti ti-world"/> GitHub Pages での無料公開手順</div>
+          <div style={{fontSize:12,color:"var(--text)",lineHeight:2}}>
+            1. <a href="https://github.com" target="_blank" style={{color:"var(--blue)"}}>GitHub.com</a> でアカウントを作成（無料）<br/>
+            2. 「New repository」でリポジトリを作成<br/>
+            3. このHTMLファイルを <code style={{background:"var(--bg3)",padding:"1px 5px",borderRadius:3}}>index.html</code> という名前でアップロード<br/>
+            4. Settings → Pages → Source を「main branch」に設定<br/>
+            5. <code style={{background:"var(--bg3)",padding:"1px 5px",borderRadius:3}}>https://ユーザー名.github.io/リポジトリ名/</code> にアクセス可能になります
+          </div>
+        </div>
+        <div style={{marginTop:10,padding:"12px 14px",background:"var(--blue-bg)",borderRadius:8,border:"1px solid var(--blue-border)"}}>
+          <div style={{fontWeight:700,color:"var(--blue)",marginBottom:8,fontSize:13}}><i className="ti ti-database"/> Firebase（リアルタイム同期）設定手順</div>
+          <div style={{fontSize:12,color:"var(--text)",lineHeight:2}}>
+            1. <a href="https://console.firebase.google.com" target="_blank" style={{color:"var(--blue)"}}>Firebase Console</a> でプロジェクトを作成<br/>
+            2. 「Realtime Database」を作成（テストモードで開始）<br/>
+            3. プロジェクト設定 → マイアプリ → ウェブアプリを追加<br/>
+            4. 表示された設定（firebaseConfig）をこのHTMLの <code style={{background:"var(--bg3)",padding:"1px 5px",borderRadius:3}}>FIREBASE_CONFIG</code> に貼り付ける<br/>
+            5. HTMLファイルを保存・再アップロードして完了
+          </div>
+        </div>
+        <div style={{marginTop:10,padding:"12px 14px",background:"var(--yellow-bg)",borderRadius:8,border:"1px solid var(--amber)"}}>
+          <div style={{fontWeight:700,color:"var(--yellow)",marginBottom:6,fontSize:13}}><i className="ti ti-key"/> PINコードの運用ヒント</div>
+          <div style={{fontSize:12,color:"var(--text)",lineHeight:1.8}}>
+            • 出席番号をそのまま使うと覚えやすい（1番→0001）<br/>
+            • CSVインポートで全生徒を一括登録できます<br/>
+            • 学期ごとにPINを変更することを推奨します
+          </div>
+        </div>
+      </div>}
+    </div>
+  </div>;
+}
+
+/* ===== 教員ホーム ===== */
+function THome({ctx,syncing}){
+  const{db,nav,setRole,deleteQ,dupQ,updateQ,showToast}=ctx;
+  const[search,setSearch]=useState("");
+  const[editId,setEditId]=useState(null);
+  const[ed,setEd]=useState({title:"",description:"",deadline:""});
+  const students=Object.values(db.students||{});
+  const quizzes=Object.values(db.quizzes||{});
+  const answers=Object.values(db.answers||{});
+  const distributions=Object.values(db.distributions||{});
+  const classes=Object.values(db.classes||{});
+  const ungraded=answers.filter(a=>a.status==="submitted").length;
+  const stats=[{l:"テスト",v:quizzes.length,ic:"ti-file",c:"#6366f1"},{l:"生徒",v:students.length,ic:"ti-users",c:"#10b981"},{l:"提出",v:answers.length,ic:"ti-upload",c:"#f59e0b"},{l:"採点済み",v:answers.filter(a=>a.status==="graded").length,ic:"ti-check",c:"#3b82f6"}];
+  const filtered=quizzes.filter(q=>q.title.includes(search)||(q.description||"").includes(search)).sort((a,b)=>b.createdAt.localeCompare(a.createdAt));
+  const startEdit=q=>{setEditId(q.id);setEd({title:q.title,description:q.description||"",deadline:q.deadline||""});};
+  const saveEdit=async()=>{if(!ed.title.trim()){showToast("タイトルを入力してください","error");return;}await ctx.updateQ(editId,ed);setEditId(null);};
+  return<div style={{minHeight:"100vh",background:"var(--bg)"}} className="page">
+    <Hdr title="小テスト管理システム" sub="教員用ダッシュボード" onLogout={()=>setRole(null)}
+      right={<div style={{display:"flex",gap:8,alignItems:"center"}}><SyncBadge syncing={syncing}/><button onClick={()=>nav("settings")} style={S.o({fontSize:12,padding:"5px 10px"})}><i className="ti ti-settings"/>設定</button><button onClick={()=>nav("notices")} style={S.o({fontSize:12,padding:"5px 10px"})}><i className="ti ti-bell"/>お知らせ</button></div>}/>
+    <div className="container" style={{maxWidth:940,margin:"0 auto",padding:"1.5rem"}}>
+      {ungraded>0&&<div style={{background:"var(--yellow-bg)",border:"1px solid var(--amber)",borderRadius:8,padding:"10px 14px",marginBottom:"1rem",display:"flex",alignItems:"center",gap:8,fontSize:13,color:"var(--yellow)",fontWeight:600}}><i className="ti ti-alert-triangle"/>未採点の回答が<strong style={{margin:"0 3px"}}>{ungraded}件</strong>あります</div>}
+      <div className="grid-stats" style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:"1.5rem"}}>
+        {stats.map(s=><div key={s.l} style={{...S.card,textAlign:"center",padding:"1.25rem"}}><div style={{width:40,height:40,borderRadius:10,background:s.c+"22",display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 8px"}}><i className={`ti ${s.ic}`} style={{fontSize:20,color:s.c}}/></div><div style={{fontSize:28,fontWeight:700,margin:"0 0 2px"}}>{s.v}</div><div style={{fontSize:12,color:"var(--text2)"}}>{s.l}</div></div>)}
+      </div>
+      <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:"1.5rem"}}>
+        <button onClick={()=>nav("create-quiz")} style={S.p()}><i className="ti ti-plus"/>新しいテストを作成</button>
+        <button onClick={()=>nav("manage-students")} style={S.o()}><i className="ti ti-users"/>生徒管理・登録</button>
+        <button onClick={()=>nav("grades-list")} style={S.o()}><i className="ti ti-chart-bar"/>評価一覧</button>
+        <button onClick={()=>nav("manage-classes")} style={S.o()}><i className="ti ti-school"/>クラス管理</button>
+      </div>
+      {students.length===0&&<div style={{...S.card,marginBottom:"1.25rem",background:"var(--yellow-bg)",border:"1px solid var(--amber)"}}><div style={{fontWeight:700,color:"var(--yellow)",marginBottom:6,display:"flex",alignItems:"center",gap:6}}><i className="ti ti-alert-triangle"/>生徒がまだ登録されていません</div><div style={{fontSize:13,color:"var(--text2)",marginBottom:10}}>「生徒管理・登録」から生徒を追加してください。CSVで一括登録もできます。</div><button onClick={()=>nav("manage-students")} style={S.p({fontSize:12})}>生徒管理・登録を開く</button></div>}
+      {students.length>0&&<div style={{...S.card,marginBottom:"1.25rem",background:"var(--blue-bg)",border:"1px solid var(--blue-border)"}}>
+        <div style={{fontSize:12,fontWeight:700,color:"var(--blue)",marginBottom:8,display:"flex",alignItems:"center",gap:5}}><i className="ti ti-eye"/>生徒画面プレビュー</div>
+        <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+          {students.map(s=>{const c=classes.find(x=>x.id===s.classId);return<button key={s.id} onClick={()=>nav("s-preview",{previewId:s.id})} style={{display:"flex",alignItems:"center",gap:6,padding:"5px 12px",background:"var(--bg2)",border:"1px solid var(--blue-border)",borderRadius:20,cursor:"pointer",fontSize:12,color:"var(--blue)"}}><div style={{width:18,height:18,borderRadius:"50%",background:"var(--blue-bg)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,color:"var(--blue)",fontSize:9}}>{s.name[0]}</div>{s.name}<span style={{opacity:0.6,fontSize:10}}>{c?.name}</span></button>;})}
+        </div>
+      </div>}
+      <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:12,flexWrap:"wrap"}}>
+        <div style={{fontSize:16,fontWeight:700}}>テスト一覧</div>
+        <div style={{flex:1,minWidth:160,maxWidth:280}}><SearchInput value={search} onChange={setSearch} placeholder="テストを検索..."/></div>
+      </div>
+      {quizzes.length===0?<Empty msg="テストがまだ作成されていません" icon="ti-file"/>:filtered.length===0?<Empty msg={`「${search}」に一致しません`} icon="ti-search"/>:
+      <div className="grid-quiz" style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(270px,1fr))",gap:14}}>
+        {filtered.map(q=>{
+          const dist=distributions.filter(d=>d.quizId===q.id);
+          const ans=answers.filter(a=>a.quizId===q.id);
+          const graded=ans.filter(a=>a.status==="graded").length;
+          const pct=ans.length>0?Math.round(graded/ans.length*100):0;
+          const distClasses=dist.map(d=>classes.find(c=>c.id===d.classId)?.name).filter(Boolean);
+          const hasUngraded=ans.some(a=>a.status==="submitted");
+          return<div key={q.id} style={{...S.card,transition:"box-shadow 0.2s,transform 0.2s"}} onMouseEnter={e=>{e.currentTarget.style.boxShadow="0 6px 20px rgba(0,0,0,0.12)";e.currentTarget.style.transform="translateY(-1px)";}} onMouseLeave={e=>{e.currentTarget.style.boxShadow="";e.currentTarget.style.transform="";}}>
+            {editId===q.id?<div>
+              <input value={ed.title} onChange={e=>setEd(d=>({...d,title:e.target.value}))} style={{marginBottom:6,fontWeight:700}} placeholder="タイトル"/>
+              <input value={ed.description} onChange={e=>setEd(d=>({...d,description:e.target.value}))} style={{marginBottom:6}} placeholder="説明"/>
+              <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8}}><label style={{fontSize:12,color:"var(--text2)",whiteSpace:"nowrap"}}>締切日</label><input type="date" value={ed.deadline} onChange={e=>setEd(d=>({...d,deadline:e.target.value}))} style={{flex:1}}/></div>
+              <div style={{display:"flex",gap:6}}><button onClick={saveEdit} style={S.p({fontSize:12,padding:"5px 12px"})}>保存</button><button onClick={()=>setEditId(null)} style={S.o({fontSize:12,padding:"5px 12px"})}>キャンセル</button></div>
+            </div>:<>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:4}}>
+                <div style={{fontWeight:700,fontSize:14,flex:1,marginRight:8}}>{q.title}</div>
+                <div style={{display:"flex",gap:2,flexShrink:0}}>
+                  <button onClick={()=>startEdit(q)} style={{background:"none",border:"none",color:"var(--text3)",cursor:"pointer",fontSize:15,padding:"2px 4px"}} aria-label="編集"><i className="ti ti-edit"/></button>
+                  <button onClick={()=>ctx.dupQ(q)} style={{background:"none",border:"none",color:"var(--text3)",cursor:"pointer",fontSize:15,padding:"2px 4px"}} aria-label="複製"><i className="ti ti-copy"/></button>
+                  <button onClick={()=>ctx.deleteQ(q.id)} style={{background:"none",border:"none",color:"var(--text3)",cursor:"pointer",fontSize:15,padding:"2px 4px"}} aria-label="削除"><i className="ti ti-trash"/></button>
+                </div>
+              </div>
+              {q.description&&<div style={{fontSize:12,color:"var(--text2)",marginBottom:6}}>{q.description}</div>}
+              <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:8}}>
+                <DeadlineBadge deadline={q.deadline}/>
+                {distClasses.length>0?distClasses.map(n=><span key={n} style={S.badge("var(--bg3)","var(--text2)")}>{n}</span>):<span style={S.badge("var(--yellow-bg)","var(--yellow)")}>未配布</span>}
+              </div>
+            </>}
+            <div style={{fontSize:11,color:"var(--text3)",marginBottom:ans.length>0?8:12}}><i className="ti ti-calendar" style={{fontSize:12,marginRight:3}}/>{q.createdAt}</div>
+            {ans.length>0&&<div style={{marginBottom:12}}>
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"var(--text2)",marginBottom:4}}><span>採点進捗</span><span style={{color:pct===100?"var(--green)":"var(--text2)",fontWeight:pct===100?700:400}}>{graded}/{ans.length}{pct===100?" ✓":""}</span></div>
+              <div style={{background:"var(--bg3)",borderRadius:99,height:6,overflow:"hidden"}}><div style={{width:`${pct}%`,height:"100%",background:pct===100?"var(--green)":"var(--blue)",borderRadius:99,transition:"width 0.4s"}}/></div>
+            </div>}
+            <div style={{display:"flex",gap:6}}>
+              <button onClick={()=>nav("distribute-quiz",{quizId:q.id})} style={S.o({flex:1,justifyContent:"center",fontSize:12})}><i className="ti ti-users"/>配布</button>
+              <button onClick={()=>nav("submissions",{quizId:q.id})} style={S.o({flex:1,justifyContent:"center",fontSize:12,background:hasUngraded?"var(--yellow-bg)":"var(--bg2)",borderColor:hasUngraded?"var(--amber)":"var(--border)"})}><i className="ti ti-clipboard-check"/>提出状況</button>
+            </div>
+          </div>;
+        })}
+      </div>}
+    </div>
+  </div>;
+}
+
+/* ===== テスト作成 ===== */
+function CreateQuiz({ctx}){
+  const{nav,addQ,showToast}=ctx;
+  const[title,setTitle]=useState("");
+  const[desc,setDesc]=useState("");
+  const[deadline,setDeadline]=useState("");
+  const[file,setFile]=useState(null);
+  const fileRef=useRef(null);
+  const create=async()=>{
+    if(!title.trim()){showToast("タイトルを入力してください","error");return;}
+    await addQ({title:title.trim(),description:desc.trim(),deadline:deadline||null});
+    nav("t-home");
+  };
+  return<div style={{minHeight:"100vh",background:"var(--bg)"}} className="page">
+    <Hdr title="新しいテストを作成" back onBack={()=>nav("t-home")}/>
+    <div style={{maxWidth:560,margin:"0 auto",padding:"1.5rem"}}>
+      <div style={S.card}>
+        <div style={{marginBottom:14}}>
+          <label style={{fontSize:13,fontWeight:700,display:"block",marginBottom:5}}>タイトル *</label>
+          <input value={title} onChange={e=>setTitle(e.target.value)} placeholder="例：1学期中間テスト" onKeyDown={e=>e.key==="Enter"&&create()}/>
+        </div>
+        <div style={{marginBottom:14}}>
+          <label style={{fontSize:13,fontWeight:700,display:"block",marginBottom:5}}>説明（オプション）</label>
+          <textarea value={desc} onChange={e=>setDesc(e.target.value)} rows={2} placeholder="テストの内容や範囲を入力"/>
+        </div>
+        <div style={{marginBottom:14}}>
+          <label style={{fontSize:13,fontWeight:700,display:"block",marginBottom:5}}>提出締切日（オプション）</label>
+          <input type="date" value={deadline} onChange={e=>setDeadline(e.target.value)}/>
+        </div>
+        <div style={{marginBottom:22}}>
+          <label style={{fontSize:13,fontWeight:700,display:"block",marginBottom:5}}>PDFファイル（オプション）</label>
+          <div onClick={()=>fileRef.current?.click()} style={{border:"2px dashed var(--border)",borderRadius:8,padding:"1.5rem",textAlign:"center",cursor:"pointer",transition:"all 0.2s",background:"var(--bg3)"}} onMouseEnter={e=>{e.currentTarget.style.borderColor="var(--text2)";e.currentTarget.style.background="var(--bg2)";}} onMouseLeave={e=>{e.currentTarget.style.borderColor="var(--border)";e.currentTarget.style.background="var(--bg3)";}}>
+            <input ref={fileRef} type="file" accept="application/pdf" style={{display:"none"}} onChange={e=>setFile(e.target.files?.[0])}/>
+            {file
+              ?<><i className="ti ti-file-type-pdf" style={{fontSize:28,color:"var(--red)"}}/><div style={{fontWeight:600,marginTop:6,fontSize:13,color:"var(--text)"}}>{file.name}</div><div style={{fontSize:11,color:"var(--text3)",marginTop:3}}>クリックして変更</div></>
+              :<><i className="ti ti-upload" style={{fontSize:32,color:"var(--text4)"}}/><div style={{color:"var(--text2)",marginTop:8,fontSize:13,fontWeight:500}}>クリックしてPDFを選択</div><div style={{color:"var(--text3)",fontSize:11,marginTop:3}}>PDF形式のみ対応</div></>}
+          </div>
+          {file&&<button onClick={()=>setFile(null)} style={{...S.o({fontSize:11,padding:"3px 8px",marginTop:6})}}>✕ 取り消す</button>}
+        </div>
+        <div style={{padding:"10px 14px",background:"var(--blue-bg)",borderRadius:8,border:"1px solid var(--blue-border)",marginBottom:16,fontSize:12,color:"var(--blue)"}}>
+          <i className="ti ti-info-circle"/> PDFは現在プレビュー表示のみ対応しています。生徒の回答は手書きキャンバスに入力します。
+        </div>
+        <div style={{display:"flex",justifyContent:"flex-end",gap:8}}>
+          <button onClick={()=>nav("t-home")} style={S.o()}>キャンセル</button>
+          <button onClick={create} style={S.p()}>作成する</button>
+        </div>
+      </div>
+    </div>
+  </div>;
+}
+
+/* ===== 配布 ===== */
+function DistributeQuiz({ctx,params}){
+  const{db,nav,distribute}=ctx;
+  const quiz=db.quizzes?.[params.quizId];
+  const classes=Object.values(db.classes||{});
+  const existing=Object.values(db.distributions||{}).filter(d=>d.quizId===params.quizId).map(d=>d.classId);
+  const[sel,setSel]=useState(existing);
+  const allSel=classes.length>0&&classes.every(c=>sel.includes(c.id));
+  return<div style={{minHeight:"100vh",background:"var(--bg)"}} className="page">
+    <Hdr title="テスト配布" sub={quiz?.title} back onBack={()=>nav("t-home")}/>
+    <div style={{maxWidth:560,margin:"0 auto",padding:"1.5rem"}}>
+      <div style={S.card}>
+        <div style={{fontSize:13,color:"var(--text2)",marginBottom:12}}>配布するクラスを選択してください</div>
+        {classes.length>1&&<button onClick={()=>setSel(allSel?[]:classes.map(c=>c.id))} style={S.o({marginBottom:10,fontSize:12})}>{allSel?"すべて解除":"すべて選択"}</button>}
+        <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:16}}>
+          {classes.map(c=>{const ok=sel.includes(c.id);const sc=Object.values(db.students||{}).filter(s=>s.classId===c.id).length;const prev=Object.values(db.distributions||{}).find(d=>d.quizId===params.quizId&&d.classId===c.id);return<button key={c.id} onClick={()=>setSel(p=>ok?p.filter(i=>i!==c.id):[...p,c.id])} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 16px",background:ok?"var(--blue-bg)":"var(--bg3)",border:ok?"2px solid var(--blue)":"1px solid var(--border)",borderRadius:8,cursor:"pointer",textAlign:"left",width:"100%",transition:"all 0.15s"}}>
+            <i className={`ti ${ok?"ti-check-circle":"ti-circle"}`} style={{fontSize:22,color:ok?"var(--blue)":"var(--text4)"}}/>
+            <div style={{flex:1}}><span style={{fontWeight:700,color:ok?"var(--blue)":"var(--text)"}}>{c.name}</span><span style={{fontSize:12,color:"var(--text3)",marginLeft:8}}>{sc}名</span>{prev&&<span style={{fontSize:11,color:"var(--text3)",marginLeft:8}}>配布済: {prev.distributedAt}</span>}</div>
+          </button>;})}
+          {classes.length===0&&<p style={{color:"var(--text3)",fontSize:13,textAlign:"center",padding:"1rem"}}>クラスが登録されていません</p>}
+        </div>
+        <div style={{display:"flex",gap:8}}>
+          <button onClick={()=>nav("t-home")} style={S.o({flex:1,justifyContent:"center"})}>キャンセル</button>
+          <button onClick={async()=>{await distribute(params.quizId,sel);nav("t-home");}} disabled={sel.length===0} style={S.p({flex:1,justifyContent:"center",opacity:sel.length?1:0.4})}><i className="ti ti-send"/>{sel.length}クラスに配布する</button>
+        </div>
+      </div>
+    </div>
+  </div>;
+}
+
+/* ===== 提出状況 ===== */
+function Submissions({ctx,params}){
+  const{db,nav}=ctx;
+  const quiz=db.quizzes?.[params.quizId];
+  const classes=db.classes||{};
+  const students=Object.values(db.students||{});
+  const distributions=Object.values(db.distributions||{});
+  const answers=Object.values(db.answers||{});
+  const scores=db.scores||{};
+  const[search,setSearch]=useState("");
+  const[filterSt,setFilterSt]=useState("all");
+  const dists=distributions.filter(d=>d.quizId===params.quizId);
+  const stds=students.filter(s=>dists.some(d=>d.classId===s.classId));
+  const rows=stds.map(s=>{const ans=answers.find(a=>a.quizId===params.quizId&&a.studentId===s.id);const sc=ans?scores[ans.id]:null;const cls=classes[s.classId];const st=!ans?"not_submitted":ans.status==="graded"?"graded":"submitted";return{s,cls:cls?.name,ans,sc,st};});
+  const filtered=rows.filter(r=>{if(filterSt!=="all"&&r.st!==filterSt)return false;if(search&&!r.s.name.includes(search)&&!r.s.studentNumber.includes(search))return false;return true;});
+  const ungradedIds=rows.filter(r=>r.st==="submitted").map(r=>r.ans.id);
+  const stInfo={graded:{bg:"var(--green-bg)",c:"var(--green)",l:"採点済み"},submitted:{bg:"var(--blue-bg)",c:"var(--blue)",l:"提出済み"},not_submitted:{bg:"var(--bg3)",c:"var(--text2)",l:"未提出"}};
+  const stats=[{l:"総生徒",v:rows.length,f:"all"},{l:"提出済み",v:rows.filter(r=>r.st!=="not_submitted").length,f:"submitted"},{l:"採点済み",v:rows.filter(r=>r.st==="graded").length,f:"graded"},{l:"未提出",v:rows.filter(r=>r.st==="not_submitted").length,f:"not_submitted"}];
+  const doExport=()=>{const h="生徒名,学番,クラス,ステータス,星,コメント,提出日時\n";const csv="\uFEFF"+h+rows.map(r=>[r.s.name,r.s.studentNumber,r.cls||"",stInfo[r.st].l,r.sc?.stars!=null?"★".repeat(r.sc.stars):"",r.sc?.comment||"",r.ans?.submittedAt||""].join(",")).join("\n");const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8;"}));a.download=`提出状況_${quiz?.title||"quiz"}.csv`;a.click();};
+  return<div style={{minHeight:"100vh",background:"var(--bg)"}} className="page">
+    <Hdr title="提出状況" sub={quiz?.title} back onBack={()=>nav("t-home")}
+      right={<div style={{display:"flex",gap:6}}>
+        {ungradedIds.length>0&&<button onClick={()=>nav("grade-answer",{answerId:ungradedIds[0],ungradedIds,quizId:params.quizId})} style={S.p({fontSize:12,background:"var(--amber)",color:"#fff"})}><i className="ti ti-player-play"/>一括採点({ungradedIds.length}件)</button>}
+        <button onClick={doExport} style={S.o({fontSize:12})}><i className="ti ti-download"/>CSV</button>
+      </div>}/>
+    <div style={{maxWidth:940,margin:"0 auto",padding:"1.5rem"}}>
+      <div className="grid-stats" style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:"1.25rem"}}>
+        {stats.map(s=><button key={s.l} onClick={()=>setFilterSt(f=>f===s.f?"all":s.f)} style={{...S.card,textAlign:"center",padding:"1rem",cursor:"pointer",border:filterSt===s.f?"2px solid var(--blue)":"1px solid var(--border)",background:filterSt===s.f?"var(--blue-bg)":"var(--bg2)"}}>
+          <div style={{fontSize:26,fontWeight:700}}>{s.v}</div><div style={{fontSize:12,color:filterSt===s.f?"var(--blue)":"var(--text2)",marginTop:3}}>{s.l}</div>
+        </button>)}
+      </div>
+      <div style={{marginBottom:10}}><SearchInput value={search} onChange={setSearch} placeholder="氏名・学番で検索..."/></div>
+      <div style={{...S.card,padding:0,overflow:"hidden"}}>
+        {filtered.length===0?<div style={{padding:"2rem",textAlign:"center",color:"var(--text3)",fontSize:13}}>該当する生徒がいません</div>
+        :<div style={{overflowX:"auto"}}><table style={{fontSize:13}}>
+          <thead><tr style={{background:"var(--bg3)",borderBottom:"1px solid var(--border)"}}>
+            {["生徒名","学番","クラス","ステータス","星評価","提出日時","操作"].map(h=><th key={h} style={{textAlign:"left",padding:"9px 14px",fontWeight:600,fontSize:12,color:"var(--text2)"}}>{h}</th>)}
+          </tr></thead>
+          <tbody>{filtered.map((r,i)=>{const si=stInfo[r.st];return<tr key={i} style={{borderBottom:"1px solid var(--border2)"}}>
+            <td style={{padding:"11px 14px",fontWeight:700}}>{r.s.name}</td>
+            <td style={{padding:"11px 14px",color:"var(--text2)"}}>{r.s.studentNumber}</td>
+            <td style={{padding:"11px 14px",color:"var(--text2)"}}>{r.cls}</td>
+            <td style={{padding:"11px 14px"}}><span style={S.badge(si.bg,si.c)}>{si.l}</span></td>
+            <td style={{padding:"11px 14px"}}>{r.sc?.stars!=null?<StarRating value={r.sc.stars} readonly size={14}/>:<span style={{color:"var(--text4)",fontSize:12}}>—</span>}</td>
+            <td style={{padding:"11px 14px",color:"var(--text3)",fontSize:12}}>{r.ans?.submittedAt||"—"}</td>
+            <td style={{padding:"11px 14px"}}>{r.ans&&<button onClick={()=>nav("grade-answer",{answerId:r.ans.id,ungradedIds,quizId:params.quizId})} style={S.o({fontSize:12,padding:"5px 12px",background:r.st==="submitted"?"var(--yellow-bg)":"var(--bg2)",borderColor:r.st==="submitted"?"var(--amber)":"var(--border)"})}>{r.st==="graded"?"✓ 再採点":"📝 採点する"}</button>}</td>
+          </tr>;})}
+          </tbody></table></div>}
+      </div>
+    </div>
+  </div>;
+}
+
+/* ===== 採点 ===== */
+function GradeAnswer({ctx,params}){
+  const{db,nav,gradeAnswer,showToast}=ctx;
+  const answers=Object.values(db.answers||{});
+  const ans=answers.find(a=>a.id===params.answerId);
+  const student=ans?db.students?.[ans.studentId]:null;
+  const quiz=ans?db.quizzes?.[ans.quizId]:null;
+  const exSc=ans?db.scores?.[ans.id]:null;
+  const[isCor,setIsCor]=useState(exSc?.isCorrect??null);
+  const[cmt,setCmt]=useState(exSc?.comment||"");
+  const[stars,setStars]=useState(exSc?.stars??null);
+  const[aiRun,setAiRun]=useState(false);
+  const[aiRes,setAiRes]=useState(exSc?.aiSuggestion?{suggestion:exSc.aiSuggestion,confidence:exSc.aiConfidence}:null);
+  const[saving,setSaving]=useState(false);
+  const ungradedIds=params.ungradedIds||[];
+  const curIdx=ungradedIds.indexOf(params.answerId);
+  const hasNext=curIdx>=0&&curIdx<ungradedIds.length-1;
+  const hasPrev=curIdx>0;
+  useEffect(()=>{
+    const h=e=>{
+      if(e.key==="ArrowRight"&&hasNext)nav("grade-answer",{answerId:ungradedIds[curIdx+1],ungradedIds,quizId:params.quizId});
+      if(e.key==="ArrowLeft"&&hasPrev)nav("grade-answer",{answerId:ungradedIds[curIdx-1],ungradedIds,quizId:params.quizId});
+      if(e.key==="o"||e.key==="O")setIsCor(true);
+      if(e.key==="x"||e.key==="X")setIsCor(false);
+      if(e.key==="Enter"&&isCor!==null&&!saving)save();
+    };
+    window.addEventListener("keydown",h);return()=>window.removeEventListener("keydown",h);
+  },[isCor,hasNext,hasPrev,saving]);
+  const save=async()=>{
+    if(isCor===null){showToast("○または×を選択してください","error");return;}
+    setSaving(true);await gradeAnswer(params.answerId,isCor,cmt,stars);
+    showToast(isCor?"○ 正解として保存しました":"× 不正解として保存しました");
+    setSaving(false);
+    if(hasNext)setTimeout(()=>nav("grade-answer",{answerId:ungradedIds[curIdx+1],ungradedIds,quizId:params.quizId}),300);
+    else{showToast(ungradedIds.length>1?"🎉 すべての採点が完了しました！":"✓ 採点を保存しました");setTimeout(()=>nav("submissions",{quizId:ans?.quizId||params.quizId}),700);}
+  };
+  const runAI=()=>{setAiRun(true);setTimeout(()=>{const r=Math.random();setAiRes({suggestion:r>0.35?"correct":"incorrect",confidence:+(0.7+Math.random()*0.28).toFixed(2)});setIsCor(r>0.35);setAiRun(false);showToast("AI採点候補を取得しました");},1500);};
+  if(!ans||!student)return<div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center"}}><p style={{color:"var(--text3)"}}>回答が見つかりません</p></div>;
+  return<div style={{minHeight:"100vh",background:"var(--bg)"}} className="page">
+    <Hdr title="採点" sub={`${student.name} — ${quiz?.title}`} back onBack={()=>nav("submissions",{quizId:ans.quizId})}
+      right={ungradedIds.length>1&&<div style={{display:"flex",gap:6,alignItems:"center"}}>
+        <button onClick={()=>nav("grade-answer",{answerId:ungradedIds[curIdx-1],ungradedIds,quizId:params.quizId})} disabled={!hasPrev} style={S.o({fontSize:12,padding:"5px 10px",opacity:hasPrev?1:0.3})}><i className="ti ti-chevron-left"/>前</button>
+        <span style={{fontSize:12,color:"var(--text2)",minWidth:60,textAlign:"center"}}>{curIdx+1}/{ungradedIds.length}件</span>
+        <button onClick={()=>nav("grade-answer",{answerId:ungradedIds[curIdx+1],ungradedIds,quizId:params.quizId})} disabled={!hasNext} style={S.o({fontSize:12,padding:"5px 10px",opacity:hasNext?1:0.3})}>次<i className="ti ti-chevron-right"/></button>
+      </div>}/>
+    <div style={{background:"var(--bg3)",borderBottom:"1px solid var(--border)",padding:"5px 20px",fontSize:11,color:"var(--text3)",display:"flex",gap:16}} className="hide-mobile">
+      {[["O","正解"],["X","不正解"],["Enter","保存"],["←→","前後移動"]].map(([k,l])=><span key={k}><kbd style={{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:3,padding:"1px 5px",fontSize:10}}>{k}</kbd> {l}</span>)}
+    </div>
+    <div className="container grid-2col" style={{maxWidth:940,margin:"0 auto",padding:"1.5rem",display:"grid",gridTemplateColumns:"1fr 290px",gap:16}}>
+      <div style={S.card}>
+        <div style={{fontWeight:700,marginBottom:12}}>回答画像</div>
+        <div style={{background:"var(--bg3)",borderRadius:10,minHeight:360,display:"flex",alignItems:"center",justifyContent:"center",border:"1px solid var(--border)",overflow:"hidden"}}>
+          {ans.imageData?<img src={ans.imageData} alt="回答" style={{maxWidth:"100%",maxHeight:500}}/>
+          :<div style={{textAlign:"center",color:"var(--text4)",padding:"2rem"}}><i className="ti ti-writing" style={{fontSize:52}}/><div style={{marginTop:12,fontSize:14,color:"var(--text3)"}}>手書き回答</div><div style={{fontSize:12,marginTop:6,color:"var(--text4)"}}>{ans.submittedAt}</div></div>}
+        </div>
+      </div>
+      <div style={{display:"flex",flexDirection:"column",gap:12}}>
+        <div style={{...S.card,background:"var(--blue-bg)",border:"1px solid var(--blue-border)"}}>
+          <div style={{fontSize:13,fontWeight:700,color:"var(--blue)",marginBottom:8,display:"flex",alignItems:"center",gap:5}}><i className="ti ti-sparkles"/>AI採点候補</div>
+          {aiRes?<div style={{display:"flex",alignItems:"center",gap:14,marginBottom:8}}>
+            <span style={{fontSize:36,fontWeight:700,color:aiRes.suggestion==="correct"?"var(--green)":"var(--red)"}}>{aiRes.suggestion==="correct"?"○":"×"}</span>
+            <div><div style={{fontWeight:700}}>{aiRes.suggestion==="correct"?"正解":"不正解"}</div><div style={{fontSize:12,color:"var(--text2)"}}>信頼度: {Math.round(aiRes.confidence*100)}%</div></div>
+          </div>:<div style={{fontSize:12,color:"var(--text2)",marginBottom:10}}>AI採点を実行して候補を取得できます</div>}
+          <button onClick={runAI} disabled={aiRun} style={S.o({width:"100%",justifyContent:"center",background:"var(--bg2)"})}>
+            {aiRun?<><i className="ti ti-loader" style={{animation:"spin 1s linear infinite"}}/>判定中...</>:<><i className="ti ti-sparkles"/>AI採点を実行</>}
+          </button>
+        </div>
+        <div style={S.card}>
+          <div style={{fontSize:13,fontWeight:700,marginBottom:10}}>採点結果</div>
+          <div style={{display:"flex",gap:8,marginBottom:12}}>
+            <button onClick={()=>setIsCor(true)} style={{flex:1,padding:"18px",fontSize:26,fontWeight:700,border:isCor===true?"2px solid var(--green)":"1px solid var(--border)",background:isCor===true?"var(--green-bg)":"var(--bg3)",borderRadius:10,cursor:"pointer",color:isCor===true?"var(--green)":"var(--text4)",transition:"all 0.15s"}}>○</button>
+            <button onClick={()=>setIsCor(false)} style={{flex:1,padding:"18px",fontSize:26,fontWeight:700,border:isCor===false?"2px solid var(--red)":"1px solid var(--border)",background:isCor===false?"var(--red-bg)":"var(--bg3)",borderRadius:10,cursor:"pointer",color:isCor===false?"var(--red)":"var(--text4)",transition:"all 0.15s"}}>×</button>
+          </div>
+          <div style={{marginBottom:12}}>
+            <label style={{fontSize:12,fontWeight:600,display:"block",marginBottom:6}}>星評価</label>
+            <div style={{display:"flex",alignItems:"center",gap:8}}><StarRating value={stars} onChange={setStars} size={26}/><span style={{fontSize:12,color:"var(--text3)"}}>{stars===1?"がんばろう":stars===2?"よくできました":stars===3?"すばらしい！":""}</span></div>
+          </div>
+          <label style={{fontSize:12,fontWeight:600,display:"block",marginBottom:5}}>コメント</label>
+          <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:6}}>
+            {["よくできました","惜しい！","計算ミスに注意","次は頑張ろう","完璧です"].map(t=><button key={t} onClick={()=>setCmt(t)} style={{fontSize:11,padding:"2px 8px",background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:4,cursor:"pointer",color:"var(--text2)"}}>{t}</button>)}
+          </div>
+          <textarea value={cmt} onChange={e=>setCmt(e.target.value)} rows={3} style={{marginBottom:12}} placeholder="生徒へのコメントを入力..."/>
+          <button onClick={save} disabled={saving} style={S.p({width:"100%",justifyContent:"center",background:isCor===false?"var(--red)":isCor===true?"var(--green)":"var(--text)",opacity:saving?0.6:isCor===null?0.4:1})}>
+            {saving?<><i className="ti ti-loader" style={{animation:"spin 0.8s linear infinite"}}/>保存中...</>:isCor===null?"○または×を選択 (O/Xキー)":`${isCor?"○ 正解":"× 不正解"}として保存`}
+          </button>
+          {hasNext&&<div style={{fontSize:11,color:"var(--text3)",marginTop:6,textAlign:"center"}}>保存後、次の未採点へ移動します</div>}
+        </div>
+      </div>
+    </div>
+  </div>;
+}
+
+/* ===== 評価一覧 ===== */
+function GradesList({ctx}){
+  const{db,nav}=ctx;
+  const[search,setSearch]=useState("");const[sortKey,setSortKey]=useState("name");const[sortAsc,setSortAsc]=useState(true);const[filterClass,setFilterClass]=useState("all");
+  const students=Object.values(db.students||{});const classes=db.classes||{};const quizzes=Object.values(db.quizzes||{});const answers=Object.values(db.answers||{});const scores=db.scores||{};
+  const rows=students.map(s=>{
+    const cls=classes[s.classId];const myA=answers.filter(a=>a.studentId===s.id);const grd=myA.filter(a=>a.status==="graded");
+    const cor=grd.filter(a=>scores[a.id]?.isCorrect===true);const rate=grd.length>0?Math.round(cor.length/grd.length*100):null;
+    const starVals=grd.map(a=>scores[a.id]?.stars).filter(x=>x!=null);const avgStars=starVals.length>0?Math.round(starVals.reduce((a,b)=>a+b,0)/starVals.length*10)/10:null;
+    return{s,cls:cls?.name,classId:s.classId,total:quizzes.length,sub:myA.length,graded:grd.length,rate,avgStars};
+  });
+  const filtered=rows.filter(r=>{if(filterClass!=="all"&&r.classId!==filterClass)return false;if(search&&!r.s.name.includes(search)&&!r.s.studentNumber.includes(search))return false;return true;});
+  const sorted=[...filtered].sort((a,b)=>{let av,bv;if(sortKey==="name"){av=a.s.name;bv=b.s.name;}else if(sortKey==="rate"){av=a.rate??-1;bv=b.rate??-1;}else if(sortKey==="stars"){av=a.avgStars??-1;bv=b.avgStars??-1;}else{av=a.s.studentNumber;bv=b.s.studentNumber;}return(av<bv?-1:av>bv?1:0)*(sortAsc?1:-1);});
+  const toggleSort=k=>{if(sortKey===k)setSortAsc(a=>!a);else{setSortKey(k);setSortAsc(true);}};
+  const SortIc=({k})=><i className={`ti ${sortKey===k?(sortAsc?"ti-sort-ascending":"ti-sort-descending"):"ti-selector"}`} style={{fontSize:11,marginLeft:2,opacity:sortKey===k?1:0.3}}/>;
+  const grade=r=>r===null?"-":r>=90?"A":r>=80?"B":r>=70?"C":r>=60?"D":"F";
+  const gc=r=>r===null?"var(--text4)":r>=80?"var(--green)":r>=60?"var(--amber)":"var(--red)";
+  const gbg=r=>r===null?"var(--bg3)":r>=80?"var(--green-bg)":r>=60?"var(--yellow-bg)":"var(--red-bg)";
+  const avg=rows.filter(r=>r.rate!==null);
+  const doExport=()=>{const h="生徒名,学番,クラス,テスト数,提出数,採点済み,正答率,評価,平均星\n";const csv="\uFEFF"+h+rows.map(r=>[r.s.name,r.s.studentNumber,r.cls||"",r.total,r.sub,r.graded,r.rate!=null?r.rate+"%":"-",grade(r.rate),r.avgStars!=null?r.avgStars.toFixed(1)+"/3":"-"].join(",")).join("\n");const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8;"}));a.download=`評価一覧_${new Date().toISOString().slice(0,10)}.csv`;a.click();};
+  return<div style={{minHeight:"100vh",background:"var(--bg)"}} className="page">
+    <Hdr title="評価一覧" back onBack={()=>nav("t-home")} right={<button onClick={doExport} style={S.o({fontSize:12})}><i className="ti ti-download"/>CSVエクスポート</button>}/>
+    <div style={{maxWidth:940,margin:"0 auto",padding:"1.5rem"}}>
+      <div className="grid-stats" style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:"1.25rem"}}>
+        {[{l:"総生徒数",v:rows.length},{l:"平均正答率",v:avg.length?Math.round(avg.reduce((s,r)=>s+r.rate,0)/avg.length)+"%":"—"},{l:"正答率80%以上",v:rows.filter(r=>r.rate!=null&&r.rate>=80).length+"名"},{l:"未採点あり",v:rows.filter(r=>r.graded<r.sub&&r.sub>0).length+"名"}].map(s=><div key={s.l} style={{...S.card,textAlign:"center",padding:"1rem"}}><div style={{fontSize:24,fontWeight:700,marginBottom:3}}>{s.v}</div><div style={{fontSize:12,color:"var(--text2)"}}>{s.l}</div></div>)}
+      </div>
+      <div style={{display:"flex",gap:8,marginBottom:10,flexWrap:"wrap"}}>
+        <div style={{flex:1,minWidth:160}}><SearchInput value={search} onChange={setSearch} placeholder="氏名・学番で検索..."/></div>
+        <select value={filterClass} onChange={e=>setFilterClass(e.target.value)} style={{width:"auto"}}><option value="all">全クラス</option>{Object.values(classes).map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select>
+      </div>
+      <div style={{...S.card,padding:0,overflow:"hidden"}}>
+        <div style={{overflowX:"auto"}}><table style={{fontSize:13}}>
+          <thead><tr style={{background:"var(--bg3)",borderBottom:"1px solid var(--border)"}}>
+            {[["name","氏名"],["num","学番"],["cls","クラス"],["total","テスト数"],["sub","提出/採点"],["rate","正答率"],["grade","評価"],["stars","平均星"]].map(([k,l])=><th key={k} onClick={()=>["name","num","rate","stars"].includes(k)&&toggleSort(k)} style={{textAlign:"left",padding:"9px 14px",fontWeight:600,fontSize:12,color:"var(--text2)",cursor:["name","num","rate","stars"].includes(k)?"pointer":"default",whiteSpace:"nowrap",userSelect:"none"}}>{l}{["name","num","rate","stars"].includes(k)&&<SortIc k={k}/>}</th>)}
+          </tr></thead>
+          <tbody>{sorted.map((r,i)=><tr key={i} style={{borderBottom:"1px solid var(--border2)"}}>
+            <td style={{padding:"11px 14px",fontWeight:700}}>{r.s.name}</td>
+            <td style={{padding:"11px 14px",color:"var(--text2)"}}>{r.s.studentNumber}</td>
+            <td style={{padding:"11px 14px",color:"var(--text2)"}}>{r.cls}</td>
+            <td style={{padding:"11px 14px",textAlign:"center"}}>{r.total}</td>
+            <td style={{padding:"11px 14px",textAlign:"center"}}><span style={{color:r.sub===r.total?"var(--green)":"var(--text2)"}}>{r.sub}</span>/{r.graded}</td>
+            <td style={{padding:"11px 14px",textAlign:"center"}}>{r.rate!=null?<span style={{fontWeight:700,color:gc(r.rate)}}>{r.rate}%</span>:<span style={{color:"var(--text4)"}}>—</span>}</td>
+            <td style={{padding:"11px 14px",textAlign:"center"}}><span style={{display:"inline-flex",width:28,height:28,borderRadius:"50%",background:gbg(r.rate),color:gc(r.rate),alignItems:"center",justifyContent:"center",fontSize:13,fontWeight:700}}>{grade(r.rate)}</span></td>
+            <td style={{padding:"11px 14px"}}>{r.avgStars!=null?<div style={{display:"flex",alignItems:"center",gap:4}}><StarRating value={Math.round(r.avgStars)} readonly size={14}/><span style={{fontSize:11,color:"var(--text3)"}}>{r.avgStars.toFixed(1)}</span></div>:<span style={{color:"var(--text4)",fontSize:12}}>—</span>}</td>
+          </tr>)}</tbody>
+        </table></div>
+      </div>
+    </div>
+  </div>;
+}
+
+/* ===== お知らせ ===== */
+function Notices({ctx}){
+  const{db,nav,addNotice,deleteNotice}=ctx;
+  const[msg,setMsg]=useState("");const[target,setTarget]=useState("all");
+  const notices=Object.values(db.notices||{}).sort((a,b)=>b.createdAt.localeCompare(a.createdAt));
+  const classes=Object.values(db.classes||{});
+  const send=async()=>{if(!msg.trim())return;await addNotice({message:msg.trim(),target,targetLabel:target==="all"?"全生徒":classes.find(c=>c.id===target)?.name||""});setMsg("");};
+  return<div style={{minHeight:"100vh",background:"var(--bg)"}} className="page">
+    <Hdr title="お知らせ管理" back onBack={()=>nav("t-home")}/>
+    <div style={{maxWidth:660,margin:"0 auto",padding:"1.5rem"}}>
+      <div style={{...S.card,marginBottom:"1rem"}}>
+        <div style={{fontWeight:700,marginBottom:12}}>新しいお知らせを送信</div>
+        <select value={target} onChange={e=>setTarget(e.target.value)} style={{marginBottom:8}}><option value="all">全生徒</option>{classes.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select>
+        <textarea value={msg} onChange={e=>setMsg(e.target.value)} rows={3} placeholder="メッセージを入力..." style={{marginBottom:8}}/>
+        <button onClick={send} disabled={!msg.trim()} style={S.p({opacity:msg.trim()?1:0.4})}><i className="ti ti-send"/>送信</button>
+      </div>
+      {notices.length===0?<Empty msg="お知らせはありません" icon="ti-bell"/>:
+      <div style={{display:"flex",flexDirection:"column",gap:8}}>
+        {notices.map(n=><div key={n.id} style={{...S.card,padding:"0.85rem 1rem"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
+            <div style={{flex:1}}><div style={{fontSize:12,color:"var(--text3)",marginBottom:4,display:"flex",gap:8}}><span style={S.badge("var(--blue-bg)","var(--blue)")}>{n.targetLabel||"全生徒"}</span><span>{n.createdAt}</span></div><div style={{fontSize:13,lineHeight:1.6}}>{n.message}</div></div>
+            <button onClick={()=>deleteNotice(n.id)} style={{background:"none",border:"none",color:"var(--text4)",cursor:"pointer",fontSize:16,padding:"2px"}}><i className="ti ti-x"/></button>
+          </div>
+        </div>)}
+      </div>}
+    </div>
+  </div>;
+}
+
+/* ===== 生徒ホーム ===== */
+function SHome({ctx}){
+  const{db,nav,userId,setRole,previewMode}=ctx;
+  const student=db.students?.[userId];
+  const cls=student?db.classes?.[student.classId]:null;
+  const distributions=Object.values(db.distributions||{});
+  const answers=Object.values(db.answers||{});
+  const scores=db.scores||{};
+  const notices=Object.values(db.notices||{}).filter(n=>n.target==="all"||n.target===cls?.id).sort((a,b)=>b.createdAt.localeCompare(a.createdAt));
+  const myD=distributions.filter(d=>cls&&d.classId===cls.id);
+  const quizzes=myD.map(d=>{const q=db.quizzes?.[d.quizId];const a=answers.find(x=>x.quizId===d.quizId&&x.studentId===userId);const sc=a?scores[a.id]:null;return{q,a,sc};}).filter(x=>x.q);
+  const stInfo={graded:{bg:"var(--green-bg)",c:"var(--green)",l:"採点済み"},submitted:{bg:"var(--blue-bg)",c:"var(--blue)",l:"提出済み・採点待ち"},not_submitted:{bg:"var(--yellow-bg)",c:"var(--yellow)",l:"未提出"}};
+  const submitted=quizzes.filter(x=>x.a).length;
+  const graded=quizzes.filter(x=>x.sc).length;
+  const correct=quizzes.filter(x=>x.sc?.isCorrect===true).length;
+  return<div style={{minHeight:"100vh",background:"var(--bg)"}} className="page">
+    {previewMode
+      ?<div style={{background:"var(--amber)",padding:"9px 20px",display:"flex",alignItems:"center",gap:10,fontSize:13,color:"#fff",fontWeight:700,position:"sticky",top:0,zIndex:50}}>
+          <i className="ti ti-eye"/>プレビュー — {student?.name}（{cls?.name}）
+          <button onClick={()=>nav("t-home")} style={{marginLeft:"auto",background:"rgba(255,255,255,0.25)",border:"none",borderRadius:6,padding:"4px 12px",color:"#fff",cursor:"pointer",fontSize:12,fontWeight:700}}>教員画面に戻る</button>
+        </div>
+      :<Hdr title="小テスト管理システム" sub="生徒用ダッシュボード" onLogout={()=>setRole(null)}/>}
+    <div style={{maxWidth:660,margin:"0 auto",padding:"1.5rem"}}>
+      <div style={{...S.card,marginBottom:"1.25rem"}}>
+        <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:quizzes.length>0?14:0}}>
+          <div style={{width:50,height:50,borderRadius:"50%",background:"linear-gradient(135deg,var(--blue-bg),var(--blue-border))",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:22,color:"var(--blue)",flexShrink:0}}>{student?.name?.[0]}</div>
+          <div><div style={{fontWeight:700,fontSize:16}}>{student?.name}</div><div style={{fontSize:12,color:"var(--text2)",marginTop:2}}>{cls?.name}　学番: {student?.studentNumber}</div></div>
+        </div>
+        {quizzes.length>0&&<div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,paddingTop:12,borderTop:"1px solid var(--border2)"}}>
+          {[{l:"提出済み",v:`${submitted}/${quizzes.length}`},{l:"採点済み",v:`${graded}/${submitted||"0"}`},{l:"正解",v:graded>0?`${correct}/${graded}`:"-"}].map(s=><div key={s.l} style={{textAlign:"center"}}><div style={{fontSize:18,fontWeight:700}}>{s.v}</div><div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>{s.l}</div></div>)}
+        </div>}
+      </div>
+      {!previewMode&&quizzes.filter(({a})=>!a).length>0&&<div style={{background:"var(--yellow-bg)",border:"1px solid var(--amber)",borderRadius:8,padding:"10px 14px",marginBottom:"1rem",display:"flex",alignItems:"center",gap:8,fontSize:13,color:"var(--yellow)",fontWeight:600}}><i className="ti ti-alert-triangle"/>未提出のテストが<strong style={{margin:"0 3px"}}>{quizzes.filter(({a})=>!a).length}件</strong>あります</div>}
+      {notices.length>0&&<div style={{...S.card,marginBottom:"1.25rem",border:"1px solid var(--blue-border)",background:"var(--blue-bg)"}}>
+        <div style={{fontSize:12,fontWeight:700,color:"var(--blue)",marginBottom:8,display:"flex",alignItems:"center",gap:5}}><i className="ti ti-bell"/>先生からのお知らせ</div>
+        {notices.slice(0,3).map(n=><div key={n.id} style={{fontSize:13,padding:"7px 0",borderBottom:"1px solid var(--blue-border)",lineHeight:1.6,color:"var(--text)"}}>{n.message}</div>)}
+      </div>}
+      <div style={{fontSize:15,fontWeight:700,marginBottom:12}}>配布されたテスト</div>
+      {quizzes.length===0?<Empty msg="配布されたテストはありません" icon="ti-clipboard"/>
+      :<div style={{display:"flex",flexDirection:"column",gap:12}}>
+        {quizzes.map(({q,a,sc})=>{
+          const st=!a?"not_submitted":a.status==="graded"?"graded":"submitted";
+          const si=stInfo[st];
+          return<div key={q.id} style={{...S.card,transition:"box-shadow 0.2s"}} onMouseEnter={e=>e.currentTarget.style.boxShadow="0 4px 16px rgba(0,0,0,0.1)"} onMouseLeave={e=>e.currentTarget.style.boxShadow=""}>
+            <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:14}}>
+              <div style={{flex:1}}>
+                <div style={{fontWeight:700,marginBottom:4,fontSize:15}}>{q.title}</div>
+                {q.description&&<div style={{fontSize:12,color:"var(--text2)",marginBottom:8}}>{q.description}</div>}
+                <div style={{display:"flex",flexWrap:"wrap",alignItems:"center",gap:8,marginBottom:4}}>
+                  <span style={S.badge(si.bg,si.c)}>{si.l}</span>
+                  {sc&&<span style={{fontSize:14,fontWeight:700,color:sc.isCorrect?"var(--green)":"var(--red)"}}>{sc.isCorrect?"○ 正解":"× 不正解"}</span>}
+                  {sc?.stars!=null&&<StarRating value={sc.stars} readonly size={16}/>}
+                  {st==="not_submitted"&&<DeadlineBadge deadline={q.deadline}/>}
+                </div>
+                {sc?.comment&&<div style={{fontSize:12,marginTop:8,padding:"8px 12px",background:"var(--bg3)",borderRadius:6,color:"var(--text)",borderLeft:"3px solid var(--border)"}}>💬 {sc.comment}</div>}
+                {a?.submittedAt&&<div style={{fontSize:11,color:"var(--text4)",marginTop:6}}>提出: {a.submittedAt}</div>}
+              </div>
+              {st==="not_submitted"&&!previewMode&&<button onClick={()=>nav("take-quiz",{quizId:q.id,quizTitle:q.title})} style={S.p({whiteSpace:"nowrap",flexShrink:0})}><i className="ti ti-pencil"/>回答する</button>}
+              {st==="not_submitted"&&previewMode&&<span style={{fontSize:12,color:"var(--text3)",padding:"5px 10px",background:"var(--bg3)",borderRadius:6,whiteSpace:"nowrap"}}>未提出</span>}
+            </div>
+          </div>;
+        })}
+      </div>}
+    </div>
+  </div>;
+}
+
+/* ===== テスト実施 ===== */
+function TakeQuiz({ctx,params}){
+  const{db,nav,userId,submitAnswer,showToast}=ctx;
+  const quiz=db.quizzes?.[params.quizId];
+  const cRef=useRef(null);
+  const[isD,setIsD]=useState(false);
+  const[color,setColor]=useState("#1a1a1a");
+  const[size,setSize]=useState(3);
+  const[eraser,setEraser]=useState(false);
+  const[showConfirm,setShowConfirm]=useState(false);
+  const[submitting,setSubmitting]=useState(false);
+  const[hist,setHist]=useState([]);
+  const[hasDraft,setHasDraft]=useState(false);
+  const lp=useRef(null);const pp=useRef(null);
+  const DRAFT=DRAFT_KEY+(params.quizId||"");
+
+  useEffect(()=>{
+    const c=cRef.current;if(!c)return;
+    c.width=c.offsetWidth*(window.devicePixelRatio||1);
+    c.height=c.offsetHeight*(window.devicePixelRatio||1);
+    const ct=c.getContext("2d");
+    ct.scale(window.devicePixelRatio||1,window.devicePixelRatio||1);
+    ct.fillStyle="#ffffff";ct.fillRect(0,0,c.offsetWidth,c.offsetHeight);
+    const draft=localStorage.getItem(DRAFT);
+    if(draft){const img=new Image();img.src=draft;img.onload=()=>{ct.drawImage(img,0,0,c.offsetWidth,c.offsetHeight);};setHasDraft(true);}
+    setHist([c.toDataURL()]);
+  },[]);
+
+  useEffect(()=>{const t=setInterval(()=>{if(cRef.current)localStorage.setItem(DRAFT,cRef.current.toDataURL());},30000);return()=>clearInterval(t);},[]);
+
+  const saveHist=()=>{const d=cRef.current.toDataURL();setHist(h=>[...h.slice(-19),d]);localStorage.setItem(DRAFT,d);};
+  const undo=()=>{if(hist.length<2)return;const prev=hist[hist.length-2];setHist(h=>h.slice(0,-1));const img=new Image();img.src=prev;img.onload=()=>{const c=cRef.current;const ct=c.getContext("2d");ct.clearRect(0,0,c.width,c.height);ct.drawImage(img,0,0,c.offsetWidth,c.offsetHeight);};};
+  const gp=(e,c)=>{const r=c.getBoundingClientRect();const s=e.touches?e.touches[0]:e;return{x:s.clientX-r.left,y:s.clientY-r.top};};
+  const sd=(e)=>{e.preventDefault();setIsD(true);pp.current=null;lp.current=gp(e,cRef.current);};
+  const draw=(e)=>{
+    e.preventDefault();if(!isD||!lp.current)return;
+    const c=cRef.current;const ct=c.getContext("2d");const p=gp(e,c);
+    ct.beginPath();
+    if(pp.current){const mx=(pp.current.x+p.x)/2;const my=(pp.current.y+p.y)/2;ct.moveTo(lp.current.x,lp.current.y);ct.quadraticCurveTo(pp.current.x,pp.current.y,mx,my);}
+    else{ct.moveTo(lp.current.x,lp.current.y);ct.lineTo(p.x,p.y);}
+    ct.strokeStyle=eraser?"#ffffff":color;ct.lineWidth=eraser?size*4:size;ct.lineCap="round";ct.lineJoin="round";ct.stroke();
+    pp.current=lp.current;lp.current=p;
+  };
+  const end=()=>{if(isD){setIsD(false);pp.current=null;saveHist();}};
+  const clear=()=>{const c=cRef.current;const ct=c.getContext("2d");ct.fillStyle="#fff";ct.fillRect(0,0,c.offsetWidth,c.offsetHeight);saveHist();};
+  const doSubmit=async()=>{
+    setSubmitting(true);
+    const img=cRef.current.toDataURL("image/png");
+    await submitAnswer(params.quizId,userId,img);
+    localStorage.removeItem(DRAFT);
+    showToast("回答を提出しました");
+    nav("submitted");
+  };
+
+  return<div style={{minHeight:"100vh",background:"var(--bg)"}} className="page">
+    <Hdr title="テスト実施" sub={quiz?.title||params.quizTitle} back onBack={()=>nav("s-home")}/>
+    {hasDraft&&<div style={{background:"var(--blue-bg)",borderBottom:"1px solid var(--blue-border)",padding:"6px 20px",fontSize:12,color:"var(--blue)",display:"flex",alignItems:"center",gap:6}}><i className="ti ti-device-floppy"/>前回の下書きを復元しました（30秒ごとに自動保存）</div>}
+    <div className="container grid-2col" style={{maxWidth:940,margin:"0 auto",padding:"1.5rem",display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
+      <div style={S.card}>
+        <div style={{fontWeight:700,marginBottom:12}}>テスト問題</div>
+        <div style={{background:"var(--bg3)",borderRadius:10,minHeight:380,display:"flex",alignItems:"center",justifyContent:"center",border:"1px solid var(--border)",color:"var(--text4)",textAlign:"center",padding:"2rem"}}>
+          <div><i className="ti ti-file-description" style={{fontSize:52}}/><div style={{marginTop:14,fontWeight:700,color:"var(--text2)",fontSize:16}}>{quiz?.title}</div>{quiz?.description&&<div style={{fontSize:13,marginTop:6,color:"var(--text3)"}}>{quiz.description}</div>}{quiz?.deadline&&<div style={{marginTop:10}}><DeadlineBadge deadline={quiz.deadline}/></div>}<div style={{fontSize:11,marginTop:20,color:"var(--text4)"}}>PDFがここに表示されます</div></div>
+        </div>
+      </div>
+      <div style={S.card}>
+        <div style={{fontWeight:700,marginBottom:10}}>回答欄（手書き）</div>
+        <canvas ref={cRef} onMouseDown={sd} onMouseMove={draw} onMouseUp={end} onMouseLeave={end} onTouchStart={sd} onTouchMove={draw} onTouchEnd={end}
+          style={{width:"100%",height:290,border:`2px solid ${eraser?"var(--amber)":"var(--border)"}`,borderRadius:8,background:"white",cursor:eraser?"cell":"crosshair",touchAction:"none"}}/>
+        <div style={{marginTop:12,display:"flex",flexDirection:"column",gap:8}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+            <span style={{fontSize:12,minWidth:50}}>ペンの色</span>
+            <input type="color" value={color} onChange={e=>{setColor(e.target.value);setEraser(false);}} style={{width:32,height:28,padding:2,cursor:"pointer",flex:"none"}}/>
+            <div style={{display:"flex",gap:4}}>{["#1a1a1a","#dc2626","#2563eb","#16a34a","#7c3aed"].map(c=><button key={c} onClick={()=>{setColor(c);setEraser(false);}} style={{width:22,height:22,background:c,border:!eraser&&color===c?"3px solid var(--text)":"2px solid transparent",borderRadius:"50%",cursor:"pointer"}} aria-label={c}/>)}</div>
+            <button onClick={()=>setEraser(e=>!e)} style={S.o({fontSize:12,padding:"4px 10px",background:eraser?"var(--yellow-bg)":"var(--bg2)",borderColor:eraser?"var(--amber)":"var(--border)"})}><i className="ti ti-eraser"/>{eraser?"消しゴム中":"消しゴム"}</button>
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <span style={{fontSize:12,minWidth:50}}>太さ: {size}px</span>
+            <input type="range" min="1" max="12" step="1" value={size} onChange={e=>setSize(Number(e.target.value))} style={{flex:1}}/>
+          </div>
+          <div style={{display:"flex",gap:6}}>
+            <button onClick={undo} disabled={hist.length<2} style={S.o({flex:1,justifyContent:"center",fontSize:12,opacity:hist.length<2?0.4:1})}><i className="ti ti-arrow-back-up"/>元に戻す</button>
+            <button onClick={clear} style={S.o({flex:1,justifyContent:"center",fontSize:12})}><i className="ti ti-eraser"/>全クリア</button>
+          </div>
+          <button onClick={()=>setShowConfirm(true)} style={S.p({justifyContent:"center"})}><i className="ti ti-send"/>提出する</button>
+        </div>
+      </div>
+    </div>
+    {showConfirm&&<ConfirmModal title="回答を提出しますか？" message={"提出後は変更できません。\nよろしいですか？"} onOk={doSubmit} onCancel={()=>{if(!submitting)setShowConfirm(false);}} okLabel={submitting?"提出中...":"提出する"} danger={false}/>}
+  </div>;
+}
+
+/* ===== 提出完了 ===== */
+function Submitted({ctx}){
+  const{nav}=ctx;
+  useEffect(()=>{const t=setTimeout(()=>nav("s-home"),5000);return()=>clearTimeout(t);},[]);
+  return<div style={{minHeight:"100vh",background:"var(--bg)",display:"flex",alignItems:"center",justifyContent:"center"}} className="page">
+    <div style={{...S.card,textAlign:"center",padding:"3rem",maxWidth:380,boxShadow:"var(--shadow)"}}>
+      <div style={{width:72,height:72,borderRadius:"50%",background:"var(--green-bg)",display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 18px"}}><i className="ti ti-check" style={{fontSize:36,color:"var(--green)"}}/></div>
+      <div style={{fontSize:22,fontWeight:700,marginBottom:10}}>提出完了！</div>
+      <div style={{color:"var(--text2)",fontSize:14,marginBottom:26}}>回答を提出しました。採点結果をお待ちください。</div>
+      <div style={{background:"var(--bg3)",borderRadius:8,height:4,overflow:"hidden",marginBottom:20}}><div style={{height:"100%",background:"var(--green)",animation:"progressBar 5s linear forwards"}}/></div>
+      <button onClick={()=>nav("s-home")} style={S.p({justifyContent:"center",width:"100%",padding:13})}>ダッシュボードへ戻る</button>
+    </div>
+  </div>;
+}
+
+ReactDOM.render(<App/>, document.getElementById("app"));
+</script>
+</body>
+</html>
